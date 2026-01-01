@@ -12,30 +12,60 @@ db.init_db()
 st.set_page_config(page_title="Planificador Pro V2", layout="wide", page_icon="🥑")
 
 # --- BARRA LATERAL ---
+# --- SEGURIDAD EN LA BARRA LATERAL ---
+st.sidebar.divider()
+st.sidebar.subheader("🔐 Acceso Editor")
+
+# Intentamos leer la clave desde Secrets, si no, usamos una por defecto para local
+clave_maestra = st.secrets.get("CLAVE_EDITOR")
+password_usuario = st.sidebar.text_input("Código de edición", type="password", key="pwd_input")
+
+es_editor = (clave_maestra is not None) and (password_usuario == clave_maestra)
+
+if es_editor:
+    st.sidebar.success("Modo Edición Activo")
+else:
+    st.sidebar.warning("Modo Lectura")
+
 st.sidebar.title("Navegación")
-opcion = st.sidebar.radio("Ir a:", ["📅 Planificador", "📖 Recetas", "🍅 Ingredientes", "🛒 Compra"])
+if es_editor:
+    opcion = st.sidebar.radio(
+        "Ir a:",
+        ["📅 Planificador", "📖 Recetas", "🍅 Ingredientes", "🛒 Compra"]
+    )
+else:
+    st.sidebar.warning("🔒 Modo Lectura")
+    # Forzamos la opción de Planificador y deshabilitamos el cambio
+    opcion = st.sidebar.radio(
+        "Ir a:",
+        ["📅 Planificador"],
+        disabled=True
+    )
 st.sidebar.divider()
 st.sidebar.subheader("Seguridad")
 st.sidebar.divider()
-with st.sidebar.expander("⚙️ Mantenimiento Avanzado"):
-    with open("data/planner.db", "rb") as f:
-        st.download_button(
-            label="📥 Copia de Seguridad (.db)",
-            data=f,
-            file_name=f"backup_planner_{date.today()}.db",
-            mime="application/x-sqlite3",
-            help="Descarga el archivo de base de datos actual a tu ordenador."
-        )
+# --- MANTENIMIENTO (Solo visible para editores) ---
+if es_editor:
+    with st.sidebar.expander("⚙️ Mantenimiento Avanzado"):
+        # Botón de Descarga
+        try:
+            with open("data/planner.db", "rb") as f:
+                st.download_button(
+                    label="📥 Copia de Seguridad (.db)",
+                    data=f,
+                    file_name=f"backup_planner_{date.today()}.db",
+                    mime="application/x-sqlite3"
+                )
+        except FileNotFoundError:
+            st.error("Archivo DB no encontrado")
 
-    st.write("---")
-
-    # Limpieza de histórico
-    confirmar = st.checkbox("Confirmar limpieza de historial")
-    if st.button("🗑️ Borrar Comidas y Compras", disabled=not confirmar, key="reset_db_sidebar"):
-        st.write("---")
-        if db.reset_historical_data():
-            st.success("Historial borrado. Recetas e ingredientes mantenidos.")
-            st.rerun()
+        st.divider()
+        st.warning("Zona de Peligro")
+        confirmar = st.checkbox("Confirmar limpieza total")
+        if st.button("🗑️ Borrar Historial", disabled=not confirmar, key="btn_reset_sidebar"):
+            if db.reset_historical_data():
+                st.success("Historial borrado")
+                st.rerun()
 
 # ----------------------------------------
 # VISTA: GESTIÓN DE INGREDIENTES
@@ -195,7 +225,7 @@ elif opcion == "📅 Planificador":
     columnas = st.columns([1, 1, 1, 1, 1, 1, 1, 1.2])
 
     # 2. Obtenemos fechas y datos
-    d = st.date_input("Semana del:", date.today())
+    d = st.date_input("Semana del:", date.today(), disabled=not es_editor)
     start_of_week = logic.get_start_of_week(d)
     plan_data = db.get_plan_range_details(start_of_week, start_of_week + timedelta(days=6))
     plan_dict = {(fecha, mom): rec_nombre for fecha, mom, _, rec_nombre in plan_data}
@@ -226,7 +256,8 @@ elif opcion == "📅 Planificador":
                     lista_nombres_recetas,
                     index=idx,
                     key=f"plan_{date_str}_{momento}",
-                    label_visibility="collapsed"
+                    label_visibility="collapsed",
+                    disabled=not es_editor
                 )
 
                 if seleccion != val_actual:
