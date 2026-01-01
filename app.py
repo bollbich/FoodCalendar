@@ -2,145 +2,331 @@ import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
 import os
-
-# Importamos nuestros módulos locales
-if not os.path.exists('data'):
-    os.makedirs('data')
-from src import db
-
-# Configuración de página
-st.set_page_config(page_title="Planificador Pro", layout="wide", page_icon="🥑")
+from src import db, logic
 
 # Inicializar DB
+if not os.path.exists('data'):
+    os.makedirs('data')
 db.init_db()
+
+st.set_page_config(page_title="Planificador Pro V2", layout="wide", page_icon="🥑")
 
 # --- BARRA LATERAL ---
 st.sidebar.title("Navegación")
-opcion = st.sidebar.radio("Ir a:", ["📅 Planificador Semanal", "📖 Mi Recetario", "🛒 Lista de la Compra"])
+opcion = st.sidebar.radio("Ir a:", ["📅 Planificador", "📖 Recetas", "🍅 Ingredientes", "🛒 Compra"])
+st.sidebar.divider()
+st.sidebar.subheader("Seguridad")
+st.sidebar.divider()
+with st.sidebar.expander("⚙️ Mantenimiento Avanzado"):
+    with open("data/planner.db", "rb") as f:
+        st.download_button(
+            label="📥 Copia de Seguridad (.db)",
+            data=f,
+            file_name=f"backup_planner_{date.today()}.db",
+            mime="application/x-sqlite3",
+            help="Descarga el archivo de base de datos actual a tu ordenador."
+        )
 
-# --- VISTA 1: RECETARIO (Fundamental para que funcione la lista) ---
-if opcion == "📖 Mi Recetario":
-    st.header("Gestión de Recetas")
-    st.info("💡 Crea recetas aquí para poder seleccionarlas en el calendario y generar la lista de compra automática.")
+    st.write("---")
 
-    col1, col2 = st.columns([1, 2])
+    # Limpieza de histórico
+    confirmar = st.checkbox("Confirmar limpieza de historial")
+    if st.button("🗑️ Borrar Comidas y Compras", disabled=not confirmar, key="reset_db_sidebar"):
+        st.write("---")
+        if db.reset_historical_data():
+            st.success("Historial borrado. Recetas e ingredientes mantenidos.")
+            st.rerun()
 
-    with col1:
-        with st.form("nueva_receta"):
-            st.subheader("Nueva Receta")
-            nombre = st.text_input("Nombre del plato (ej: Lentejas)")
-            ingredientes = st.text_area("Ingredientes (separados por coma)",
-                                        placeholder="Lentejas, Chorizo, Zanahoria, Cebolla")
-            submitted = st.form_submit_button("Guardar Receta")
+# ----------------------------------------
+# VISTA: GESTIÓN DE INGREDIENTES
+# ----------------------------------------
+if opcion == "🍅 Ingredientes":
+    st.header("Gestión de la Despensa")
 
-            if submitted and nombre:
-                db.save_recipe(nombre, ingredientes)
-                st.success(f"Receta '{nombre}' guardada.")
-                st.rerun()
+    tab1, tab2 = st.tabs(["➕ Añadir Nuevo", "✏️ Editar / Ver Listado"])
 
-    with col2:
-        st.subheader("Recetas Disponibles")
-        recetas = db.get_all_recipes()
-        if recetas:
-            df_recetas = pd.DataFrame(recetas, columns=["Nombre"])
-            st.dataframe(df_recetas, use_container_width=True)
+    # --- TAB 1: AÑADIR ---
+    with tab1:
+        col1, _ = st.columns([1, 1])
+        with col1:
+            nuevo_ing = st.text_input("Nombre del nuevo ingrediente (ej: Brócoli)").strip()
+            if st.button("Añadir a la lista"):
+                if nuevo_ing:
+                    if db.add_ingredient(nuevo_ing):
+                        st.success(f"✅ {nuevo_ing} añadido correctamente")
+                        st.rerun()
+                    else:
+                        st.error("Este ingrediente ya existe en tu lista.")
+
+    # --- TAB 2: EDITAR Y LISTADO ---
+    with tab2:
+        all_ings = db.get_all_ingredients()  # Retorna [(id, nombre), ...]
+
+        if not all_ings:
+            st.info("La despensa está vacía.")
         else:
-            st.warning("Aún no tienes recetas. ¡Añade algunas!")
+            col_list, col_edit = st.columns([1, 1])
 
-# --- VISTA 2: PLANIFICADOR (CALENDARIO) ---
-elif opcion == "📅 Planificador Semanal":
-    st.header("Planificación de Comidas")
+            with col_list:
+                st.subheader("Ingredientes actuales")
+                df_ings = pd.DataFrame(all_ings, columns=["ID", "Nombre"])
+                st.dataframe(
+                    df_ings,
+                    column_order=("Nombre",),
+                    use_container_width=True,
+                    height=400,
+                    hide_index=True
+                )
 
-    recetas_disponibles = [""] + db.get_all_recipes()  # Opción vacía al principio
-    momentos = ["Desayuno", "Media Mañana", "Comida", "Media Tarde", "Cena"]
+            with col_edit:
+                st.subheader("Modificar ingrediente")
+                ing_selec = st.selectbox(
+                    "Selecciona el ingrediente a cambiar",
+                    all_ings,
+                    format_func=lambda x: x[1],
+                    key="select_edit_ing"
+                )
 
-    # Selector de fecha (Semana)
-    d = st.date_input("Selecciona el inicio de la semana", date.today())
-    start_of_week = d - timedelta(days=d.weekday())  # Forzar a lunes
+                if ing_selec:
+                    id_i, nombre_i = ing_selec
 
-    st.write(f"Viendo semana del: **{start_of_week}** al **{start_of_week + timedelta(days=6)}**")
+                    with st.form("form_edit_ing"):
+                        nuevo_nom_ing = st.text_input("Nuevo nombre", value=nombre_i)
 
-    # Recuperar datos de la semana
-    plan_data = db.get_plan_range(start_of_week, start_of_week + timedelta(days=6))
-    # Convertir a diccionario para acceso rápido {(fecha, momento): receta}
-    plan_dict = {(fecha, mom): rec for fecha, mom, rec in plan_data}
+                        c1, c2 = st.columns(2)
+                        if c1.form_submit_button("💾 Guardar"):
+                            if nuevo_nom_ing:
+                                if db.update_ingredient(id_i, nuevo_nom_ing):
+                                    st.success("Nombre actualizado")
+                                    st.rerun()
 
-    # Crear Grid de 7 días
-    cols = st.columns(7)
-    days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+                        if c2.form_submit_button("🗑️ Borrar"):
+                            # El borrado afectará a las recetas (se quita de ellas)
+                            db.delete_ingredient(id_i)
+                            st.warning("Ingrediente eliminado")
+                            st.rerun()
 
-    for i, col in enumerate(cols):
+                    st.info(
+                        "⚠️ Al cambiar el nombre o borrar, los cambios se reflejan en todas tus recetas automáticamente.")
+
+# ----------------------------------------
+# VISTA: GESTIÓN DE RECETAS
+# ----------------------------------------
+elif opcion == "📖 Recetas":
+    st.header("Gestión de Recetas")
+
+    all_ings = db.get_all_ingredients()
+    opciones_ingredientes = {nombre: id_ing for id_ing, nombre in all_ings}
+    recetas_existentes = db.get_all_recipes()  # [(id, nombre)]
+
+    tab1, tab2 = st.tabs(["➕ Crear Nueva", "✏️ Editar / Ver Recetas"])
+
+    # --- TAB 1: CREAR ---
+    with tab1:
+        with st.form("form_crear"):
+            nombre_n = st.text_input("Nombre del Plato")
+            ings_n = st.multiselect("Ingredientes", options=opciones_ingredientes.keys())
+            if st.form_submit_button("Guardar Nueva Receta"):
+                if nombre_n and ings_n:
+                    ids = [opciones_ingredientes[x] for x in ings_n]
+                    db.create_recipe(nombre_n, ids)
+                    st.success("¡Receta creada!")
+                    st.rerun()
+
+    # --- TAB 2: EDITAR ---
+    with tab2:
+        if not recetas_existentes:
+            st.info("No hay recetas para editar.")
+        else:
+            # 1. Seleccionar qué receta editar
+            receta_selec = st.selectbox(
+                "Selecciona una receta para modificar",
+                recetas_existentes,
+                format_func=lambda x: x[1]
+            )
+
+            if receta_selec:
+                id_r, nombre_r = receta_selec
+
+                # 2. Obtener ingredientes actuales para pre-rellenar el multiselect
+                ings_actuales = db.get_recipe_ingredients(id_r)
+
+                with st.form("form_editar"):
+                    nuevo_nombre = st.text_input("Editar nombre", value=nombre_r)
+                    nuevos_ings = st.multiselect(
+                        "Editar ingredientes",
+                        options=opciones_ingredientes.keys(),
+                        default=ings_actuales  # <--- Esto pre-rellena lo que ya tenía
+                    )
+
+                    col_btn1, col_btn2 = st.columns(2)
+                    if col_btn1.form_submit_button("💾 Guardar Cambios"):
+                        ids_n = [opciones_ingredientes[x] for x in nuevos_ings]
+                        if db.update_recipe(id_r, nuevo_nombre, ids_n):
+                            st.success("Receta actualizada con éxito")
+                            st.rerun()
+
+                    if col_btn2.form_submit_button("🗑️ Eliminar Receta Totalmente"):
+                        db.delete_recipe(id_r)
+                        st.warning("Receta eliminada")
+                        st.rerun()
+
+# ----------------------------------------
+# VISTA: PLANIFICADOR (CALENDARIO)
+# ----------------------------------------
+elif opcion == "📅 Planificador":
+    st.header("Planificación Semanal")
+
+    momentos_config = {
+        "Desayuno": "☕",
+        "Media Mañana": "🍏",
+        "Comida": "🍲",
+        "Media Tarde": "🥪",
+        "Cena": "🥗",
+        "Compra General": "🛒"
+    }
+
+    raw_recipes = db.get_all_recipes()
+    opciones_recetas = {nombre: id_rec for id_rec, nombre in raw_recipes}
+    lista_nombres_recetas = [""] + list(opciones_recetas.keys())
+
+    # 1. Definimos las columnas: 7 para los días y 1 para la leyenda (a la derecha)
+    # Ajustamos pesos: los días necesitan más espacio que la leyenda
+    columnas = st.columns([1, 1, 1, 1, 1, 1, 1, 1.2])
+
+    # 2. Obtenemos fechas y datos
+    d = st.date_input("Semana del:", date.today())
+    start_of_week = logic.get_start_of_week(d)
+    plan_data = db.get_plan_range_details(start_of_week, start_of_week + timedelta(days=6))
+    plan_dict = {(fecha, mom): rec_nombre for fecha, mom, _, rec_nombre in plan_data}
+
+    dias_nombres = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+
+    # 3. Dibujamos los 7 días
+    for i in range(7):
         current_date = start_of_week + timedelta(days=i)
         date_str = str(current_date)
 
-        with col:
-            st.markdown(f"### {days[i]}")
-            st.caption(f"{current_date.strftime('%d/%m')}")
+        with columnas[i]:
+            # Encabezado del día
+            st.markdown(f"""
+                <div style="background-color:#f0f2f6; padding:10px; border-radius:5px; text-align:center; height:70px; margin-bottom:10px; display:flex; flex-direction:column; justify-content:center;">
+                    <p style="margin:0; font-weight:bold; line-height:1.2;">{dias_nombres[i]}</p>
+                    <p style="margin:0; font-size:0.8em;">{current_date.strftime('%d/%m')}</p>
+                </div>
+            """, unsafe_allow_html=True)
 
-            for momento in momentos:
-                key_val = f"{date_str}_{momento}"
-                # Valor actual en DB o vacío
-                valor_actual = plan_dict.get((date_str, momento), "")
-
-                # Si la receta guardada ya no existe en el recetario, manéjalo con cuidado
-                index_val = recetas_disponibles.index(valor_actual) if valor_actual in recetas_disponibles else 0
+            # Selectores de comida
+            for momento in momentos_config.keys():
+                val_actual = plan_dict.get((date_str, momento), "")
+                idx = lista_nombres_recetas.index(val_actual) if val_actual in lista_nombres_recetas else 0
 
                 seleccion = st.selectbox(
-                    momento,
-                    recetas_disponibles,
-                    index=index_val,
-                    key=key_val,
-                    label_visibility="collapsed"  # Ocultar etiqueta para ahorrar espacio visual
+                    f"{momento}_{date_str}",
+                    lista_nombres_recetas,
+                    index=idx,
+                    key=f"plan_{date_str}_{momento}",
+                    label_visibility="collapsed"
                 )
 
-                # Guardar automáticamente si cambia (Auto-save)
-                if seleccion != valor_actual:
-                    db.save_meal(current_date, momento, seleccion)
-                    # No hacemos rerun aquí para no refrescar toda la pág constantemente,
-                    # pero se guarda en DB.
+                if seleccion != val_actual:
+                    db.save_meal_plan(current_date, momento, opciones_recetas.get(seleccion))
+                    st.rerun()
 
-# --- VISTA 3: LISTA DE LA COMPRA AUTOMÁTICA ---
-elif opcion == "🛒 Lista de la Compra":
-    st.header("Generador de Lista de la Compra")
+    # 4. Dibujamos la LEYENDA en la última columna (índice 7)
+    with columnas[7]:
+        # ESPACIADOR: Este bloque vacío hace que la leyenda baje y se alinee con los selectores
+        st.markdown('<div style="height:80px;margin-top:1px;"></div>', unsafe_allow_html=True)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        start_d = st.date_input("Desde", date.today())
-    with col2:
-        end_d = st.date_input("Hasta", date.today() + timedelta(days=7))
+        for momento, emoji in momentos_config.items():
+            # Usamos st.info o un markdown personalizado para que tenga la misma altura que un selectbox
+            st.markdown(f"""
+                <div style="height:38px; display:flex; align-items:center; background-color:#e1f5fe; border-radius:5px; padding-left:10px; margin-bottom:18px; border: 1px solid #b3e5fc;">
+                    <span style="font-size:0.9em;">{emoji} <b>{momento}</b></span>
+                </div>
+            """, unsafe_allow_html=True)
 
-    if st.button("Generar Lista"):
-        # 1. Obtener platos planificados
-        plan_data = db.get_plan_range(start_d, end_d)
+# ----------------------------------------
+# VISTA: COMPRA
+# ----------------------------------------
+elif opcion == "🛒 Compra":
+    st.header("Lista de la Compra Inteligente")
 
-        if not plan_data:
-            st.warning("No hay comidas planificadas para esas fechas.")
-        else:
-            lista_ingredientes = []
-            st.write(f"Analizando {len(plan_data)} comidas planificadas...")
+    # Aseguramos que la tabla de compras exista
+    db.init_shopping_db()
 
-            # 2. Buscar ingredientes de cada plato
-            for _, _, receta in plan_data:
-                if receta:
-                    ings = db.get_ingredients(receta)
-                    # Separar por comas y limpiar espacios
-                    lista_ingredientes.extend([i.strip().title() for i in ings.split(',') if i.strip()])
+    # --- 1. SELECTOR DE FECHAS ---
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        hoy = date.today()
+        lunes_esta_semana = logic.get_start_of_week(hoy)
+        # Añadimos key única para evitar conflictos
+        start_w = st.date_input("Semana del", lunes_esta_semana, key="fecha_compra_input")
+        start_w = logic.get_start_of_week(start_w)
 
-            # 3. Agrupar y contar (opcional, aquí solo listamos únicos o todos)
-            from collections import Counter
+    with col_f2:
+        end_w = start_w + timedelta(days=6)
+        st.info(f"Visualizando hasta el {end_w.strftime('%d/%m/%Y')}")
 
-            conteo = Counter(lista_ingredientes)
+    st.divider()
 
-            st.subheader("📝 Tu Lista:")
+    # --- 2. LOGICA DE DATOS ---
+    datos_plan = db.get_plan_range_details(start_w, end_w)
+    lista_bruta = logic.extract_ingredients_from_plan(datos_plan, db)
+    conteo_ingredientes = logic.aggregate_ingredients(lista_bruta)
 
-            check_col1, check_col2 = st.columns(2)
+    if not conteo_ingredientes:
+        st.warning("📭 No tienes comidas planificadas para esta semana. ¡Ve al Planificador!")
+    else:
+        # Recuperamos estado de la BD
+        estado_compras = db.get_shopping_status(start_w)
 
-            # Mostramos como checkboxes para ir tachando
-            for i, (ingrediente, cantidad) in enumerate(conteo.items()):
-                # Distribuir en dos columnas
-                col = check_col1 if i % 2 == 0 else check_col2
-                col.checkbox(f"{ingrediente} (x{cantidad})")
+        # --- 3. BARRA DE PROGRESO ---
+        total_items = len(conteo_ingredientes)
+        # Contamos cuántos True hay en la base de datos para los ingredientes actuales
+        comprados_count = sum(1 for ing in conteo_ingredientes if estado_compras.get(ing, False))
 
-            # Opción de exportar
-            df_lista = pd.DataFrame(lista_ingredientes, columns=["Ingrediente"])
-            st.download_button("Descargar CSV", df_lista.to_csv(index=False), "compra.csv")
+        # Evitamos división por cero
+        progreso = comprados_count / total_items if total_items > 0 else 0
+
+        st.progress(progreso, text=f"Progreso de compra: {comprados_count} de {total_items} artículos")
+
+        # --- 4. LISTA DE CHECKBOXES ---
+        c1, c2 = st.columns(2)
+        items_ordenados = sorted(conteo_ingredientes.items())
+
+        for i, (ingrediente, cantidad) in enumerate(items_ordenados):
+            col = c1 if i % 2 == 0 else c2
+
+            esta_marcado = estado_compras.get(ingrediente, False)
+
+            # Checkbox con Key única basada en semana e ingrediente
+            nuevo_estado = col.checkbox(
+                f"{ingrediente} (x{cantidad})",
+                value=esta_marcado,
+                key=f"chk_{start_w}_{ingrediente}"
+            )
+
+            # Guardado inmediato al cambiar
+            if nuevo_estado != esta_marcado:
+                db.update_shopping_status(start_w, ingrediente, nuevo_estado)
+                st.rerun()
+
+        st.divider()
+
+        # --- 5. BOTÓN DE RESET (CON BORRADO DE MEMORIA) ---
+        col_reset, _ = st.columns([1, 2])
+        with col_reset:
+            if st.button("🗑️ Vaciar lista de esta semana", key="btn_reset_compra_final"):
+                # 1. Borrar de la base de datos (Persistencia)
+                db.clear_shopping_status(start_w)
+
+                # 2. Borrar de la memoria de Streamlit (Interfaz)
+                # Buscamos todas las variables que empiecen por el patrón de esta semana
+                prefijo = f"chk_{start_w}"
+                for key in list(st.session_state.keys()):
+                    if key.startswith(prefijo):
+                        del st.session_state[key]
+
+                st.success("Lista reiniciada.")
+                st.rerun()
