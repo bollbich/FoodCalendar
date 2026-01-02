@@ -243,9 +243,44 @@ elif opcion == "📖 Recetas":
 elif opcion == "📅 Planificador":
     st.header("Planificación Semanal")
 
+    # --- LÓGICA DE NAVEGACIÓN POR SEMANAS ---
+    # Si no existe una fecha en memoria, ponemos la de hoy
+    if "fecha_planificador" not in st.session_state:
+        st.session_state["fecha_planificador"] = date.today()
+
+    # Creamos tres columnas para los controles de fecha
+    col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
+
+    with col_nav1:
+        if st.button("⬅️ Semana Anterior", use_container_width=True):
+            st.session_state["fecha_planificador"] -= timedelta(days=7)
+            st.rerun()
+
+    with col_nav2:
+        # El selector de fecha ahora usa el valor de session_state
+        nueva_fecha = st.date_input(
+            "Seleccionar fecha específica:",
+            value=st.session_state["fecha_planificador"],
+            key="selector_fecha_manual",
+            disabled=not es_editor
+        )
+        # Si el usuario cambia la fecha manualmente en el calendario
+        if nueva_fecha != st.session_state["fecha_planificador"]:
+            st.session_state["fecha_planificador"] = nueva_fecha
+            st.rerun()
+
+    with col_nav3:
+        if st.button("Semana Siguiente ➡️", use_container_width=True):
+            st.session_state["fecha_planificador"] += timedelta(days=7)
+            st.rerun()
+
+    # Calculamos el inicio de la semana basada en lo que hay en memoria
+    start_of_week = logic.get_start_of_week(st.session_state["fecha_planificador"])
+
+    st.info(
+        f"📅 Semana del **{start_of_week.strftime('%d/%m/%Y')}** al **{(start_of_week + timedelta(days=6)).strftime('%d/%m/%Y')}**")
+
     # 1. Obtenemos fechas y datos
-    d = st.date_input("Semana del:", date.today(), disabled=not es_editor)
-    start_of_week = logic.get_start_of_week(d)
     plan_data = db.get_plan_range_details(start_of_week, start_of_week + timedelta(days=6))
     plan_dict = {(fecha, mom): rec_nombre for fecha, mom, _, rec_nombre in plan_data}
 
@@ -326,22 +361,42 @@ elif opcion == "🛒 Compra":
     # Aseguramos que la tabla de compras exista
     db.init_shopping_db()
 
-    # --- 1. SELECTOR DE FECHAS ---
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        hoy = date.today()
-        lunes_esta_semana = logic.get_start_of_week(hoy)
-        # Añadimos key única para evitar conflictos
-        start_w = st.date_input("Semana del", lunes_esta_semana, key="fecha_compra_input")
-        start_w = logic.get_start_of_week(start_w)
+    # --- 1. NAVEGACIÓN DE FECHAS CON FLECHAS ---
+    # Inicializamos la fecha en el estado de la sesión si no existe
+    if "fecha_compra" not in st.session_state:
+        st.session_state["fecha_compra"] = date.today()
 
-    with col_f2:
-        end_w = start_w + timedelta(days=6)
-        st.info(f"Visualizando hasta el {end_w.strftime('%d/%m/%Y')}")
+    # Creamos 3 columnas para: Flecha Izq | Calendario | Flecha Der
+    c_nav1, c_nav2, c_nav3 = st.columns([1, 2, 1])
 
-    st.divider()
+    with c_nav1:
+        if st.button("⬅️ Semana anterior", key="btn_prev_compra", use_container_width=True):
+            st.session_state["fecha_compra"] -= timedelta(days=7)
+            st.rerun()
 
-    # --- 2. LOGICA DE DATOS ---
+    with c_nav2:
+        # El date_input ahora sincroniza con session_state
+        fecha_sel = st.date_input(
+            "Semana del",
+            value=st.session_state["fecha_compra"],
+            key="fecha_compra_input"
+        )
+        if fecha_sel != st.session_state["fecha_compra"]:
+            st.session_state["fecha_compra"] = fecha_sel
+            st.rerun()
+
+    with c_nav3:
+        if st.button("Semana siguiente ➡️", key="btn_next_compra", use_container_width=True):
+            st.session_state["fecha_compra"] += timedelta(days=7)
+            st.rerun()
+
+    # Definimos el inicio y fin de semana para la lógica de datos
+    start_w = logic.get_start_of_week(st.session_state["fecha_compra"])
+    end_w = start_w + timedelta(days=6)
+
+    st.info(f"📋 Listado del **{start_w.strftime('%d/%m')}** al **{end_w.strftime('%d/%m/%Y')}**")
+
+    # --- 2. LOGICA DE DATOS (El resto de tu código sigue igual) ---
     datos_plan = db.get_plan_range_details(start_w, end_w)
     lista_bruta = logic.extract_ingredients_from_plan(datos_plan, db)
     conteo_ingredientes = logic.aggregate_ingredients(lista_bruta)
