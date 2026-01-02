@@ -102,7 +102,7 @@ if opcion == "🍅 Ingredientes":
 
         with col2:
             st.selectbox("Categoría", [
-                "🥦 Frutería", "🥩 Carnicería", "🧀 Lácteos", "🥖 Panadería",
+                "🥦 Frutería", "🥩 Carnicería", "🧀 Charcuteria", "🥛 Frescos", "🥖 Panadería",
                 "🥫 Despensa", "🧼 Limpieza", "❄️ Congelados", "Otros"
             ], key="nueva_cat_sel")
 
