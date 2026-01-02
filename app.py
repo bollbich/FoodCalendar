@@ -145,6 +145,9 @@ if opcion == "🍅 Ingredientes":
 elif opcion == "📖 Recetas":
     st.header("Gestión de Recetas")
 
+    # Aseguramos que exista la receta especial "Compra"
+    db.ensure_special_recipe("Compra")
+
     all_ings = db.get_all_ingredients()
     opciones_ingredientes = {nombre: id_ing for id_ing, nombre in all_ings}
     recetas_existentes = db.get_all_recipes()  # [(id, nombre)]
@@ -165,41 +168,74 @@ elif opcion == "📖 Recetas":
 
     # --- TAB 2: EDITAR ---
     with tab2:
-        if not recetas_existentes:
-            st.info("No hay recetas para editar.")
-        else:
-            # 1. Seleccionar qué receta editar
-            receta_selec = st.selectbox(
-                "Selecciona una receta para modificar",
-                recetas_existentes,
-                format_func=lambda x: x[1]
-            )
+        # --- TAB 2: EDITAR ---
+        with tab2:
+            if not recetas_existentes:
+                st.info("No hay recetas para editar.")
+            else:
+                # Botón de acceso rápido
+                if st.button("🛒 Editar Lista de Compra General", use_container_width=True):
+                    # Buscamos el ID de la receta "Compra" en la lista de existentes
+                    for r_id, r_nom in recetas_existentes:
+                        if r_nom == "Compra":
+                            st.session_state["receta_a_editar"] = (r_id, r_nom)
+                            st.rerun()
+
+                # Determinamos qué receta mostrar en el selectbox por defecto
+                # Si venimos del botón, usamos el session_state
+                indice_defecto = 0
+                if "receta_a_editar" in st.session_state:
+                    # Buscamos la posición del ID guardado para que el selectbox se mueva ahí
+                    ids_solo = [r[0] for r in recetas_existentes]
+                    if st.session_state["receta_a_editar"][0] in ids_solo:
+                        indice_defecto = ids_solo.index(st.session_state["receta_a_editar"][0])
+
+                receta_selec = st.selectbox(
+                    "Selecciona una receta para modificar",
+                    recetas_existentes,
+                    format_func=lambda x: x[1],
+                    index=indice_defecto
+                )
 
             if receta_selec:
                 id_r, nombre_r = receta_selec
+                es_receta_especial = (nombre_r == "Compra")
 
-                # 2. Obtener ingredientes actuales para pre-rellenar el multiselect
                 ings_actuales = db.get_recipe_ingredients(id_r)
 
                 with st.form("form_editar"):
-                    nuevo_nombre = st.text_input("Editar nombre", value=nombre_r)
+                    # Bloqueamos el cambio de nombre si es la receta especial
+                    nuevo_nombre = st.text_input(
+                        "Editar nombre",
+                        value=nombre_r,
+                        disabled=es_receta_especial  # <--- Protegido
+                    )
+
                     nuevos_ings = st.multiselect(
                         "Editar ingredientes",
                         options=opciones_ingredientes.keys(),
-                        default=ings_actuales  # <--- Esto pre-rellena lo que ya tenía
+                        default=ings_actuales
                     )
 
                     col_btn1, col_btn2 = st.columns(2)
+
                     if col_btn1.form_submit_button("💾 Guardar Cambios"):
                         ids_n = [opciones_ingredientes[x] for x in nuevos_ings]
                         if db.update_recipe(id_r, nuevo_nombre, ids_n):
-                            st.success("Receta actualizada con éxito")
+                            st.success("Actualizada con éxito")
+                            # Limpiamos el acceso rápido al guardar
+                            if "receta_a_editar" in st.session_state:
+                                del st.session_state["receta_a_editar"]
                             st.rerun()
 
-                    if col_btn2.form_submit_button("🗑️ Eliminar Receta Totalmente"):
+                    # El botón de eliminar se deshabilita si es la receta "Compra"
+                    if col_btn2.form_submit_button("🗑️ Eliminar Receta", disabled=es_receta_especial):
                         db.delete_recipe(id_r)
                         st.warning("Receta eliminada")
                         st.rerun()
+
+                if es_receta_especial:
+                    st.caption("ℹ️ Esta es una receta del sistema. No se puede borrar ni renombrar.")
 
 # ----------------------------------------
 # VISTA: PLANIFICADOR (CALENDARIO)

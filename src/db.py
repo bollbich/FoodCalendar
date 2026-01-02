@@ -83,6 +83,17 @@ def update_ingredient(ingrediente_id, nuevo_nombre):
         return False
 
 # --- GESTIÓN DE RECETAS ---
+def ensure_special_recipe(nombre_especial):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    # Verificamos si existe
+    c.execute("SELECT id FROM recetas WHERE nombre = ?", (nombre_especial,))
+    if not c.fetchone():
+        # Si no existe, la creamos vacía (sin ingredientes inicialmente)
+        c.execute("INSERT INTO recetas (nombre) VALUES (?)", (nombre_especial,))
+        conn.commit()
+    conn.close()
+
 def create_recipe(nombre_receta, lista_ids_ingredientes):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
