@@ -77,67 +77,106 @@ if opcion == "🍅 Ingredientes":
 
     # --- TAB 1: AÑADIR ---
     with tab1:
-        col1, _ = st.columns([1, 1])
+        # 1. Función para procesar el envío y limpiar el campo
+        def procesar_alta_ingrediente():
+            # Recuperamos los valores de la memoria temporal (session_state)
+            nombre = st.session_state.nuevo_ing_nombre.strip()
+            categoria = st.session_state.nueva_cat_sel
+
+            if nombre:
+                if db.add_ingredient(nombre, categoria):
+                    st.toast(f"✅ {nombre} añadido", icon="🛒")
+                    # Limpiamos la variable del input en el estado de la sesión
+                    st.session_state.nuevo_ing_nombre = ""
+                else:
+                    st.error("Ese ingrediente ya existe.")
+            else:
+                st.warning("Escribe un nombre.")
+
+
+        col1, col2 = st.columns([1, 1])
+
         with col1:
-            nuevo_ing = st.text_input("Nombre del nuevo ingrediente (ej: Brócoli)").strip()
-            if st.button("Añadir a la lista"):
-                if nuevo_ing:
-                    if db.add_ingredient(nuevo_ing):
-                        st.success(f"✅ {nuevo_ing} añadido correctamente")
-                        st.rerun()
-                    else:
-                        st.error("Este ingrediente ya existe en tu lista.")
+            # Vinculamos el input a una clave de sesión (key)
+            st.text_input("Nombre del nuevo ingrediente", key="nuevo_ing_nombre")
+
+        with col2:
+            st.selectbox("Categoría", [
+                "🥦 Frutería", "🥩 Carnicería", "🧀 Lácteos", "🥖 Panadería",
+                "🥫 Despensa", "🧼 Limpieza", "❄️ Congelados", "Otros"
+            ], key="nueva_cat_sel")
+
+        # Al pulsar, llamamos a la función de arriba
+        st.button("Añadir a la lista", on_click=procesar_alta_ingrediente)
 
     # --- TAB 2: EDITAR Y LISTADO ---
     with tab2:
-        all_ings = db.get_all_ingredients()  # Retorna [(id, nombre), ...]
+        all_ings = db.get_all_ingredients()
 
         if not all_ings:
             st.info("La despensa está vacía.")
         else:
+            lista_categorias = [
+                "🥦 Frutería", "🥩 Carnicería", "🧀 Charcuteria", "🥛 Frescos", "🥖 Panadería",
+                "🥫 Despensa", "🧼 Limpieza", "❄️ Congelados", "Otros"
+            ]
+
+            df_ings = pd.DataFrame(all_ings, columns=["ID", "Nombre", "Categoría"])
+
+            # Dividimos en dos columnas
             col_list, col_edit = st.columns([1, 1])
 
             with col_list:
-                st.subheader("Ingredientes actuales")
-                df_ings = pd.DataFrame(all_ings, columns=["ID", "Nombre"])
-                st.dataframe(
+                st.subheader("Ingredientes")
+                event = st.dataframe(
                     df_ings,
-                    column_order=("Nombre",),
+                    column_order=("Nombre", "Categoría"),
                     use_container_width=True,
-                    height=400,
-                    hide_index=True
+                    height=450,  # Altura fija para que no sea infinita
+                    hide_index=True,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key="tabla_ings_lateral"
                 )
 
             with col_edit:
-                st.subheader("Modificar ingrediente")
-                ing_selec = st.selectbox(
-                    "Selecciona el ingrediente a cambiar",
-                    all_ings,
-                    format_func=lambda x: x[1],
-                    key="select_edit_ing"
-                )
+                st.subheader("Editar Selección")
 
-                if ing_selec:
-                    id_i, nombre_i = ing_selec
+                indices = event.selection.rows
 
-                    with st.form("form_edit_ing"):
-                        nuevo_nom_ing = st.text_input("Nuevo nombre", value=nombre_i)
+                if indices:
+                    row_idx = indices[0]
+                    id_i = int(df_ings.iloc[row_idx]["ID"])
+                    nombre_i = df_ings.iloc[row_idx]["Nombre"]
+                    cat_i = df_ings.iloc[row_idx]["Categoría"]
+
+                    # Usamos el form con key dinámica para asegurar limpieza de datos
+                    with st.form(key=f"form_side_edit_{id_i}"):
+                        nuevo_nom = st.text_input("Nombre", value=nombre_i)
+
+                        try:
+                            idx_cat = lista_categorias.index(cat_i)
+                        except:
+                            idx_cat = lista_categorias.index("Otros")
+
+                        nueva_cat = st.selectbox("Categoría", options=lista_categorias, index=idx_cat)
 
                         c1, c2 = st.columns(2)
-                        if c1.form_submit_button("💾 Guardar"):
-                            if nuevo_nom_ing:
-                                if db.update_ingredient(id_i, nuevo_nom_ing):
-                                    st.success("Nombre actualizado")
-                                    st.rerun()
 
-                        if c2.form_submit_button("🗑️ Borrar"):
-                            # El borrado afectará a las recetas (se quita de ellas)
+                        if c1.form_submit_button("💾 Guardar", use_container_width=True):
+                            if nuevo_nom:
+                                db.update_ingredient(id_i, nuevo_nom, nueva_cat)
+                                st.toast(f"✅ {nuevo_nom} actualizado")
+                                st.rerun()
+
+                        if c2.form_submit_button("🗑️ Borrar", use_container_width=True):
                             db.delete_ingredient(id_i)
-                            st.warning("Ingrediente eliminado")
+                            st.warning("Eliminado")
                             st.rerun()
 
-                    st.info(
-                        "⚠️ Al cambiar el nombre o borrar, los cambios se reflejan en todas tus recetas automáticamente.")
+                    st.info("💡 Cambia el nombre o categoría y pulsa Guardar.")
+                else:
+                    st.info("👈 Selecciona un ingrediente de la lista para editar sus detalles.")
 
 # ----------------------------------------
 # VISTA: GESTIÓN DE RECETAS
@@ -149,66 +188,79 @@ elif opcion == "📖 Recetas":
     db.ensure_special_recipe("Compra")
 
     all_ings = db.get_all_ingredients()
-    opciones_ingredientes = {nombre: id_ing for id_ing, nombre in all_ings}
+    opciones_ingredientes = {nombre: id_ing for id_ing, nombre, _ in all_ings}
     recetas_existentes = db.get_all_recipes()  # [(id, nombre)]
 
     tab1, tab2 = st.tabs(["➕ Crear Nueva", "✏️ Editar / Ver Recetas"])
 
     # --- TAB 1: CREAR ---
     with tab1:
-        with st.form("form_crear"):
-            nombre_n = st.text_input("Nombre del Plato")
-            ings_n = st.multiselect("Ingredientes", options=opciones_ingredientes.keys())
-            if st.form_submit_button("Guardar Nueva Receta"):
-                if nombre_n and ings_n:
-                    ids = [opciones_ingredientes[x] for x in ings_n]
-                    db.create_recipe(nombre_n, ids)
-                    st.success("¡Receta creada!")
-                    st.rerun()
+        # Definimos la función de guardado para limpiar los campos después
+        def guardar_receta_nueva():
+            nom = st.session_state.crear_receta_nombre.strip()
+            ings = st.session_state.crear_receta_ings
+
+            if nom and ings:
+                ids = [opciones_ingredientes[x] for x in ings]
+                if db.create_recipe(nom, ids):
+                    st.toast(f"✅ Receta '{nom}' creada")
+                    # Limpiamos los widgets usando sus keys
+                    st.session_state.crear_receta_nombre = ""
+                    st.session_state.crear_receta_ings = []
+                else:
+                    st.error("Error al guardar la receta.")
+            else:
+                st.warning("Escribe un nombre y elige ingredientes.")
+
+
+        # Widgets vinculados a session_state
+        st.text_input("Nombre del Plato", key="crear_receta_nombre")
+        st.multiselect("Ingredientes", options=opciones_ingredientes.keys(), key="crear_receta_ings")
+
+        # Botón con callback para limpiar al terminar
+        st.button("Guardar Nueva Receta", on_click=guardar_receta_nueva)
 
     # --- TAB 2: EDITAR ---
     with tab2:
-        # --- TAB 2: EDITAR ---
-        with tab2:
-            if not recetas_existentes:
-                st.info("No hay recetas para editar.")
-            else:
-                # Botón de acceso rápido
-                if st.button("🛒 Editar Lista de Compra General", use_container_width=True):
-                    # Buscamos el ID de la receta "Compra" en la lista de existentes
-                    for r_id, r_nom in recetas_existentes:
-                        if r_nom == "Compra":
-                            st.session_state["receta_a_editar"] = (r_id, r_nom)
-                            st.rerun()
+        if not recetas_existentes:
+            st.info("No hay recetas para editar.")
+        else:
+            # Botón de acceso rápido
+            if st.button("🛒 Editar Lista de Compra General", use_container_width=True):
+                for r_id, r_nom in recetas_existentes:
+                    if r_nom == "Compra":
+                        st.session_state["receta_a_editar"] = (r_id, r_nom)
+                        st.rerun()
 
-                # Determinamos qué receta mostrar en el selectbox por defecto
-                # Si venimos del botón, usamos el session_state
-                indice_defecto = 0
-                if "receta_a_editar" in st.session_state:
-                    # Buscamos la posición del ID guardado para que el selectbox se mueva ahí
-                    ids_solo = [r[0] for r in recetas_existentes]
-                    if st.session_state["receta_a_editar"][0] in ids_solo:
-                        indice_defecto = ids_solo.index(st.session_state["receta_a_editar"][0])
+            # Lógica de selección por defecto
+            indice_defecto = 0
+            if "receta_a_editar" in st.session_state:
+                ids_solo = [r[0] for r in recetas_existentes]
+                try:
+                    indice_defecto = ids_solo.index(st.session_state["receta_a_editar"][0])
+                except ValueError:
+                    indice_defecto = 0
 
-                receta_selec = st.selectbox(
-                    "Selecciona una receta para modificar",
-                    recetas_existentes,
-                    format_func=lambda x: x[1],
-                    index=indice_defecto
-                )
+            receta_selec = st.selectbox(
+                "Selecciona una receta para modificar",
+                recetas_existentes,
+                format_func=lambda x: x[1],
+                index=indice_defecto,
+                key="selector_editar_receta"  # Key para evitar conflictos
+            )
 
             if receta_selec:
                 id_r, nombre_r = receta_selec
                 es_receta_especial = (nombre_r == "Compra")
-
                 ings_actuales = db.get_recipe_ingredients(id_r)
 
-                with st.form("form_editar"):
-                    # Bloqueamos el cambio de nombre si es la receta especial
+                # Aquí SÍ mantenemos el st.form porque en edición
+                # no queremos que se borre todo al guardar, sino ver el cambio
+                with st.form("form_editar_receta"):
                     nuevo_nombre = st.text_input(
                         "Editar nombre",
                         value=nombre_r,
-                        disabled=es_receta_especial  # <--- Protegido
+                        disabled=es_receta_especial
                     )
 
                     nuevos_ings = st.multiselect(
@@ -223,19 +275,18 @@ elif opcion == "📖 Recetas":
                         ids_n = [opciones_ingredientes[x] for x in nuevos_ings]
                         if db.update_recipe(id_r, nuevo_nombre, ids_n):
                             st.success("Actualizada con éxito")
-                            # Limpiamos el acceso rápido al guardar
+                            # Si era la compra general, limpiamos el estado de edición rápida
                             if "receta_a_editar" in st.session_state:
                                 del st.session_state["receta_a_editar"]
                             st.rerun()
 
-                    # El botón de eliminar se deshabilita si es la receta "Compra"
                     if col_btn2.form_submit_button("🗑️ Eliminar Receta", disabled=es_receta_especial):
                         db.delete_recipe(id_r)
                         st.warning("Receta eliminada")
                         st.rerun()
 
                 if es_receta_especial:
-                    st.caption("ℹ️ Esta es una receta del sistema. No se puede borrar ni renombrar.")
+                    st.caption("ℹ️ Esta es una receta del sistema (Compra General). No se puede borrar ni renombrar.")
 
 # ----------------------------------------
 # VISTA: PLANIFICADOR (CALENDARIO)
@@ -305,7 +356,7 @@ elif opcion == "📅 Planificador":
 
     dias_nombres = ["Momentos", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
-    # 3. Dibujamos la LEYENDA en la última columna (índice 7)
+    # 3. Dibujamos la LEYENDA en la última columna
     with columnas[0]:
         # ESPACIADOR: Este bloque vacío hace que la leyenda baje y se alinee con los selectores
         st.markdown('<div style="height:80px;margin-top:1px;"></div>', unsafe_allow_html=True)
@@ -358,101 +409,86 @@ elif opcion == "📅 Planificador":
 elif opcion == "🛒 Compra":
     st.header("Lista de la Compra")
 
-    # Aseguramos que la tabla de compras exista
     db.init_shopping_db()
 
-    # --- 1. NAVEGACIÓN DE FECHAS CON FLECHAS ---
-    # Inicializamos la fecha en el estado de la sesión si no existe
+    # --- 1. NAVEGACIÓN DE FECHAS ---
     if "fecha_compra" not in st.session_state:
         st.session_state["fecha_compra"] = date.today()
 
-    # Creamos 3 columnas para: Flecha Izq | Calendario | Flecha Der
     c_nav1, c_nav2, c_nav3 = st.columns([1, 2, 1])
-
     with c_nav1:
-        if st.button("⬅️ Semana anterior", key="btn_prev_compra", use_container_width=True):
+        if st.button("⬅️ Anterior", key="btn_prev_compra", use_container_width=True):
             st.session_state["fecha_compra"] -= timedelta(days=7)
             st.rerun()
-
     with c_nav2:
-        # El date_input ahora sincroniza con session_state
-        fecha_sel = st.date_input(
-            "Semana del",
-            value=st.session_state["fecha_compra"],
-            key="fecha_compra_input"
-        )
+        fecha_sel = st.date_input("Semana del", value=st.session_state["fecha_compra"], key="fecha_compra_input")
         if fecha_sel != st.session_state["fecha_compra"]:
             st.session_state["fecha_compra"] = fecha_sel
             st.rerun()
-
     with c_nav3:
-        if st.button("Semana siguiente ➡️", key="btn_next_compra", use_container_width=True):
+        if st.button("Siguiente ➡️", key="btn_next_compra", use_container_width=True):
             st.session_state["fecha_compra"] += timedelta(days=7)
             st.rerun()
 
-    # Definimos el inicio y fin de semana para la lógica de datos
     start_w = logic.get_start_of_week(st.session_state["fecha_compra"])
     end_w = start_w + timedelta(days=6)
-
     st.info(f"📋 Listado del **{start_w.strftime('%d/%m')}** al **{end_w.strftime('%d/%m/%Y')}**")
 
-    # --- 2. LOGICA DE DATOS (El resto de tu código sigue igual) ---
+    # --- 2. LOGICA DE DATOS ---
     datos_plan = db.get_plan_range_details(start_w, end_w)
     lista_bruta = logic.extract_ingredients_from_plan(datos_plan, db)
     conteo_ingredientes = logic.aggregate_ingredients(lista_bruta)
 
     if not conteo_ingredientes:
-        st.warning("📭 No tienes comidas planificadas para esta semana. ¡Ve al Planificador!")
+        st.warning("📭 No hay comidas planificadas.")
     else:
-        # Recuperamos estado de la BD
         estado_compras = db.get_shopping_status(start_w)
+
+        # OBTENER CATEGORÍAS
+        # Retorna un diccionario {NombreIngrediente: Categoria}
+        categorias_dict = db.get_ingredients_categories()
 
         # --- 3. BARRA DE PROGRESO ---
         total_items = len(conteo_ingredientes)
-        # Contamos cuántos True hay en la base de datos para los ingredientes actuales
         comprados_count = sum(1 for ing in conteo_ingredientes if estado_compras.get(ing, False))
-
-        # Evitamos división por cero
         progreso = comprados_count / total_items if total_items > 0 else 0
+        st.progress(progreso, text=f"Progreso: {comprados_count} de {total_items}")
 
-        st.progress(progreso, text=f"Progreso de compra: {comprados_count} de {total_items} artículos")
+        # --- 4. LISTA DE CHECKBOXES POR CATEGORÍAS ---
+        # Agrupamos los ingredientes por su categoría
+        agrupados = {}
+        for ing, cant in conteo_ingredientes.items():
+            cat = categorias_dict.get(ing, "Otros")
+            if cat not in agrupados: agrupados[cat] = []
+            agrupados[cat].append((ing, cant))
 
-        # --- 4. LISTA DE CHECKBOXES ---
-        c1, c2 = st.columns(2)
-        items_ordenados = sorted(conteo_ingredientes.items())
+        # Dibujamos un colapsable por cada categoría
+        for cat in sorted(agrupados.keys()):
+            with st.expander(f"{cat}", expanded=True):
+                c1, c2 = st.columns(2)
+                for idx, (ingrediente, cantidad) in enumerate(sorted(agrupados[cat])):
+                    col = c1 if idx % 2 == 0 else c2
+                    esta_marcado = estado_compras.get(ingrediente, False)
 
-        for i, (ingrediente, cantidad) in enumerate(items_ordenados):
-            col = c1 if i % 2 == 0 else c2
+                    nuevo_estado = col.checkbox(
+                        f"{ingrediente} (x{cantidad})",
+                        value=esta_marcado,
+                        key=f"chk_{start_w}_{ingrediente}"
+                    )
 
-            esta_marcado = estado_compras.get(ingrediente, False)
-
-            # Checkbox con Key única basada en semana e ingrediente
-            nuevo_estado = col.checkbox(
-                f"{ingrediente} (x{cantidad})",
-                value=esta_marcado,
-                key=f"chk_{start_w}_{ingrediente}"
-            )
-
-            # Guardado inmediato al cambiar
-            if nuevo_estado != esta_marcado:
-                db.update_shopping_status(start_w, ingrediente, nuevo_estado)
-                st.rerun()
+                    if nuevo_estado != esta_marcado:
+                        db.update_shopping_status(start_w, ingrediente, nuevo_estado)
+                        st.rerun()
 
         st.divider()
 
-        # --- 5. BOTÓN DE RESET (CON BORRADO DE MEMORIA) ---
+        # --- 5. BOTÓN DE RESET ---
         col_reset, _ = st.columns([1, 2])
         with col_reset:
             if st.button("🗑️ Vaciar lista de esta semana", key="btn_reset_compra_final"):
-                # 1. Borrar de la base de datos (Persistencia)
                 db.clear_shopping_status(start_w)
-
-                # 2. Borrar de la memoria de Streamlit (Interfaz)
-                # Buscamos todas las variables que empiecen por el patrón de esta semana
                 prefijo = f"chk_{start_w}"
                 for key in list(st.session_state.keys()):
                     if key.startswith(prefijo):
                         del st.session_state[key]
-
-                st.success("Lista reiniciada.")
                 st.rerun()

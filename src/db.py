@@ -11,7 +11,8 @@ def init_db():
 
     # 1. Tabla de Ingredientes Únicos
     c.execute('''CREATE TABLE IF NOT EXISTS ingredientes
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  categoria TEXT DEFAULT 'Otros',
                   nombre TEXT UNIQUE)''')
 
     # 2. Tabla de Recetas
@@ -55,32 +56,61 @@ def run_query(query, params=(), return_data=False):
 
 
 # --- GESTIÓN DE INGREDIENTES ---
-def add_ingredient(nombre):
-    # Guardamos siempre en formato Título para evitar duplicados (arroz = Arroz)
-    nombre_limpio = nombre.strip().title()
+def add_ingredient(nombre, categoria="Otros"):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
     try:
-        run_query("INSERT INTO ingredientes (nombre) VALUES (?)", (nombre_limpio,))
+        c.execute("INSERT INTO ingredientes (nombre, categoria) VALUES (?, ?)", (nombre, categoria))
+        conn.commit()
         return True
-    except:
-        return False  # Probablemente ya existía
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
 
 
 def get_all_ingredients():
-    data = run_query("SELECT id, nombre FROM ingredientes ORDER BY nombre", return_data=True)
-    return data  # Retorna lista de tuplas [(1, 'Arroz'), (2, 'Pollo')]
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    # Importante: Pedimos ID, nombre y categoria
+    c.execute("SELECT id, nombre, categoria FROM ingredientes ORDER BY nombre ASC")
+    res = c.fetchall()
+    conn.close()
+    return res
 
+def get_ingredients_categories():
+    """Devuelve un diccionario con el nombre del ingrediente y su categoría"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    # Intentamos obtener nombre y categoria
+    try:
+        c.execute("SELECT nombre, categoria FROM ingredientes")
+        # Si la categoría es None o vacía, le ponemos "Otros"
+        res = {row[0]: (row[1] if row[1] else "Otros") for row in c.fetchall()}
+    except sqlite3.OperationalError:
+        # Si la columna no existe aún, devolvemos "Otros" para todos
+        c.execute("SELECT nombre FROM ingredientes")
+        res = {row[0]: "Otros" for row in c.fetchall()}
+    conn.close()
+    return res
 
 def delete_ingredient(ingrediente_id):
     run_query("DELETE FROM ingredientes WHERE id=?", (ingrediente_id,))
 
-def update_ingredient(ingrediente_id, nuevo_nombre):
-    nombre_limpio = nuevo_nombre.strip().title()
+def update_ingredient(ing_id, new_name, new_cat):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
     try:
-        run_query("UPDATE ingredientes SET nombre = ? WHERE id = ?", (nombre_limpio, ingrediente_id))
+        c.execute(
+            "UPDATE ingredientes SET nombre = ?, categoria = ? WHERE id = ?",
+            (new_name, new_cat, ing_id)
+        )
+        conn.commit()
         return True
-    except Exception as e:
-        print(f"Error al editar ingrediente: {e}")
+    except sqlite3.Error:
         return False
+    finally:
+        conn.close()
 
 # --- GESTIÓN DE RECETAS ---
 def ensure_special_recipe(nombre_especial):
@@ -183,7 +213,7 @@ def init_shopping_db():
     c.execute('''CREATE TABLE IF NOT EXISTS compras_estado
                  (semana_inicio TEXT, 
                   ingrediente_nombre TEXT, 
-                  comprado BOOLEAN,
+                  comprado BOOLEAN,                  
                   PRIMARY KEY (semana_inicio, ingrediente_nombre))''')
     conn.commit()
     conn.close()
