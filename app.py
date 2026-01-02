@@ -207,6 +207,12 @@ elif opcion == "📖 Recetas":
 elif opcion == "📅 Planificador":
     st.header("Planificación Semanal")
 
+    # 1. Obtenemos fechas y datos
+    d = st.date_input("Semana del:", date.today(), disabled=not es_editor)
+    start_of_week = logic.get_start_of_week(d)
+    plan_data = db.get_plan_range_details(start_of_week, start_of_week + timedelta(days=6))
+    plan_dict = {(fecha, mom): rec_nombre for fecha, mom, _, rec_nombre in plan_data}
+
     momentos_config = {
         "Desayuno": "☕",
         "Media Mañana": "🍏",
@@ -220,20 +226,29 @@ elif opcion == "📅 Planificador":
     opciones_recetas = {nombre: id_rec for id_rec, nombre in raw_recipes}
     lista_nombres_recetas = [""] + list(opciones_recetas.keys())
 
-    # 1. Definimos las columnas: 7 para los días y 1 para la leyenda (a la derecha)
+    # 2. Definimos las columnas: 7 para los días y 1 para la leyenda
     # Ajustamos pesos: los días necesitan más espacio que la leyenda
-    columnas = st.columns([1, 1, 1, 1, 1, 1, 1, 1.2])
+    columnas = st.columns([0.8, 1, 1, 1, 1, 1, 1, 1])
 
-    # 2. Obtenemos fechas y datos
-    d = st.date_input("Semana del:", date.today(), disabled=not es_editor)
-    start_of_week = logic.get_start_of_week(d)
-    plan_data = db.get_plan_range_details(start_of_week, start_of_week + timedelta(days=6))
-    plan_dict = {(fecha, mom): rec_nombre for fecha, mom, _, rec_nombre in plan_data}
 
-    dias_nombres = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
-    # 3. Dibujamos los 7 días
-    for i in range(7):
+    dias_nombres = ["Momentos", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+
+    # 3. Dibujamos la LEYENDA en la última columna (índice 7)
+    with columnas[0]:
+        # ESPACIADOR: Este bloque vacío hace que la leyenda baje y se alinee con los selectores
+        st.markdown('<div style="height:80px;margin-top:1px;"></div>', unsafe_allow_html=True)
+
+        for momento, emoji in momentos_config.items():
+            # Usamos st.info o un markdown personalizado para que tenga la misma altura que un selectbox
+            st.markdown(f"""
+                    <div style="height:38px; display:flex; align-items:center; background-color:#e1f5fe; border-radius:5px; padding-left:10px; margin-bottom:18px; border: 1px solid #b3e5fc;">
+                        <span style="font-size:0.9em;">{emoji} <b>{momento}</b></span>
+                    </div>
+                """, unsafe_allow_html=True)
+
+    # 4. Dibujamos los 7 días
+    for i in range(1, 8):
         current_date = start_of_week + timedelta(days=i)
         date_str = str(current_date)
 
@@ -264,18 +279,7 @@ elif opcion == "📅 Planificador":
                     db.save_meal_plan(current_date, momento, opciones_recetas.get(seleccion))
                     st.rerun()
 
-    # 4. Dibujamos la LEYENDA en la última columna (índice 7)
-    with columnas[7]:
-        # ESPACIADOR: Este bloque vacío hace que la leyenda baje y se alinee con los selectores
-        st.markdown('<div style="height:80px;margin-top:1px;"></div>', unsafe_allow_html=True)
 
-        for momento, emoji in momentos_config.items():
-            # Usamos st.info o un markdown personalizado para que tenga la misma altura que un selectbox
-            st.markdown(f"""
-                <div style="height:38px; display:flex; align-items:center; background-color:#e1f5fe; border-radius:5px; padding-left:10px; margin-bottom:18px; border: 1px solid #b3e5fc;">
-                    <span style="font-size:0.9em;">{emoji} <b>{momento}</b></span>
-                </div>
-            """, unsafe_allow_html=True)
 
 # ----------------------------------------
 # VISTA: COMPRA
