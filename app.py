@@ -11,6 +11,22 @@ db.init_db()
 
 st.set_page_config(page_title="Planificador Pro V2", layout="wide", page_icon="🥑")
 
+# --- CONFIGURACIÓN DE ESTADO Y FECHAS ---
+if "fecha_global" not in st.session_state:
+    st.session_state["fecha_global"] = logic.get_start_of_week(date.today())
+
+def change_date(dias=0, nueva_fecha=None):
+    if nueva_fecha is not None:
+        base = nueva_fecha
+    else:
+        base = st.session_state["fecha_global"] + timedelta(days=dias)
+
+    st.session_state["fecha_global"] = logic.get_start_of_week(base)
+
+def get_start_of_week(dt):
+    # dt.weekday() devuelve 0 para Lunes, 1 para Martes...
+    return dt - timedelta(days=dt.weekday())
+
 # --- BARRA LATERAL ---
 # --- SEGURIDAD EN LA BARRA LATERAL ---
 st.sidebar.divider()
@@ -102,7 +118,7 @@ if opcion == "🍅 Ingredientes":
 
         with col2:
             st.selectbox("Categoría", [
-                "🥦 Frutería", "🥩 Carnicería", "🧀 Charcuteria", "🥛 Frescos", "🥖 Panadería",
+                "🥦 Frutería", "🥩 Carnicería", "🧀 Charcuteria", "🐟 Pescaderia", "🥛 Frescos", "🥖 Panadería",
                 "🥫 Despensa", "🧼 Limpieza", "❄️ Congelados", "Otros"
             ], key="nueva_cat_sel")
 
@@ -117,7 +133,7 @@ if opcion == "🍅 Ingredientes":
             st.info("La despensa está vacía.")
         else:
             lista_categorias = [
-                "🥦 Frutería", "🥩 Carnicería", "🧀 Charcuteria", "🥛 Frescos", "🥖 Panadería",
+                "🥦 Frutería", "🥩 Carnicería", "🧀 Charcuteria", "🐟 Pescaderia", "🥛 Frescos", "🥖 Panadería",
                 "🥫 Despensa", "🧼 Limpieza", "❄️ Congelados", "Otros"
             ]
 
@@ -294,36 +310,32 @@ elif opcion == "📖 Recetas":
 elif opcion == "📅 Planificador":
     st.header("Planificación Semanal")
 
-    # --- LÓGICA DE NAVEGACIÓN POR SEMANAS ---
-    if "fecha_planificador" not in st.session_state:
-        st.session_state["fecha_planificador"] = date.today()
-
+    # --- NAVEGACIÓN UNIFICADA (Planificador) ---
     col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
 
-    # 1. BOTÓN ANTERIOR
     with col_nav1:
-        if st.button("⬅️ Semana Anterior", use_container_width=True):
-            st.session_state["fecha_planificador"] -= timedelta(days=7)
-            st.rerun()
+        if st.button("⬅️ Semana Anterior", key="btn_prev_plan", use_container_width=True):
+            change_date(dias=-7)
 
-    # 2. SELECTOR DE FECHA (El truco es NO usar el valor de retorno directamente para evitar el bucle)
     with col_nav2:
+        def update_plan_date():
+            change_date(nueva_fecha=st.session_state.selector_fecha_plan_input)
+
+
         st.date_input(
-            "Seleccionar fecha específica:",
-            value=st.session_state["fecha_planificador"],
-            key="selector_manual",  # Key para que Streamlit lo gestione
-            on_change=lambda: st.session_state.update({"fecha_planificador": st.session_state.selector_manual}),
+            "Seleccionar fecha:",
+            value=st.session_state["fecha_global"],
+            key="selector_fecha_plan_input",
+            on_change=update_plan_date,  # Usamos la función local
             disabled=not es_editor
         )
 
-    # 3. BOTÓN SIGUIENTE
     with col_nav3:
-        if st.button("Semana Siguiente ➡️", use_container_width=True):
-            st.session_state["fecha_planificador"] += timedelta(days=7)
-            st.rerun()
+        if st.button("Semana Siguiente ➡️", key="btn_next_plan", use_container_width=True):
+            change_date(dias=7)
 
-    # Calculamos el inicio de la semana basada en lo que hay en memoria
-    start_of_week = logic.get_start_of_week(st.session_state["fecha_planificador"])
+    # Usamos la fecha global para calcular la semana
+    start_of_week = logic.get_start_of_week(st.session_state["fecha_global"])
 
     st.info(
         f"📅 Semana del **{start_of_week.strftime('%d/%m/%Y')}** al **{(start_of_week + timedelta(days=6)).strftime('%d/%m/%Y')}**")
@@ -390,36 +402,39 @@ elif opcion == "📅 Planificador":
 
                 if seleccion != val_actual:
                     db.save_meal_plan(current_date, momento, opciones_recetas.get(seleccion))
-                    st.rerun()
 
 # ----------------------------------------
 # VISTA: COMPRA
 # ----------------------------------------
 elif opcion == "🛒 Compra":
     st.header("Lista de la Compra")
-
     db.init_shopping_db()
 
-    # --- 1. NAVEGACIÓN DE FECHAS ---
-    if "fecha_compra" not in st.session_state:
-        st.session_state["fecha_compra"] = date.today()
-
+    # --- NAVEGACIÓN UNIFICADA (Compra) ---
     c_nav1, c_nav2, c_nav3 = st.columns([1, 2, 1])
+
     with c_nav1:
         if st.button("⬅️ Anterior", key="btn_prev_compra", use_container_width=True):
-            st.session_state["fecha_compra"] -= timedelta(days=7)
-            st.rerun()
+            change_date(dias=-7)
+
     with c_nav2:
-        fecha_sel = st.date_input("Semana del", value=st.session_state["fecha_compra"], key="fecha_compra_input")
-        if fecha_sel != st.session_state["fecha_compra"]:
-            st.session_state["fecha_compra"] = fecha_sel
-            st.rerun()
+        def update_compra_date():
+            change_date(nueva_fecha=st.session_state.selector_fecha_compra_input)
+
+
+        st.date_input(
+            "Semana del",
+            value=st.session_state["fecha_global"],
+            key="selector_fecha_compra_input",
+            on_change=update_compra_date
+        )
+
     with c_nav3:
         if st.button("Siguiente ➡️", key="btn_next_compra", use_container_width=True):
-            st.session_state["fecha_compra"] += timedelta(days=7)
-            st.rerun()
+            change_date(dias=7)
 
-    start_w = logic.get_start_of_week(st.session_state["fecha_compra"])
+    # Usamos la misma fecha global
+    start_w = logic.get_start_of_week(st.session_state["fecha_global"])
     end_w = start_w + timedelta(days=6)
     st.info(f"📋 Listado del **{start_w.strftime('%d/%m')}** al **{end_w.strftime('%d/%m/%Y')}**")
 
