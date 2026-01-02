@@ -321,7 +321,7 @@ elif opcion == "📅 Planificador":
 # VISTA: COMPRA
 # ----------------------------------------
 elif opcion == "🛒 Compra":
-    st.header("Lista de la Compra Inteligente")
+    st.header("Lista de la Compra")
 
     # Aseguramos que la tabla de compras exista
     db.init_shopping_db()
