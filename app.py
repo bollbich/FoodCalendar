@@ -295,31 +295,28 @@ elif opcion == "📅 Planificador":
     st.header("Planificación Semanal")
 
     # --- LÓGICA DE NAVEGACIÓN POR SEMANAS ---
-    # Si no existe una fecha en memoria, ponemos la de hoy
     if "fecha_planificador" not in st.session_state:
         st.session_state["fecha_planificador"] = date.today()
 
-    # Creamos tres columnas para los controles de fecha
     col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
 
+    # 1. BOTÓN ANTERIOR
     with col_nav1:
         if st.button("⬅️ Semana Anterior", use_container_width=True):
             st.session_state["fecha_planificador"] -= timedelta(days=7)
             st.rerun()
 
+    # 2. SELECTOR DE FECHA (El truco es NO usar el valor de retorno directamente para evitar el bucle)
     with col_nav2:
-        # El selector de fecha ahora usa el valor de session_state
-        nueva_fecha = st.date_input(
+        st.date_input(
             "Seleccionar fecha específica:",
             value=st.session_state["fecha_planificador"],
-            key="selector_fecha_manual",
+            key="selector_manual",  # Key para que Streamlit lo gestione
+            on_change=lambda: st.session_state.update({"fecha_planificador": st.session_state.selector_manual}),
             disabled=not es_editor
         )
-        # Si el usuario cambia la fecha manualmente en el calendario
-        if nueva_fecha != st.session_state["fecha_planificador"]:
-            st.session_state["fecha_planificador"] = nueva_fecha
-            st.rerun()
 
+    # 3. BOTÓN SIGUIENTE
     with col_nav3:
         if st.button("Semana Siguiente ➡️", use_container_width=True):
             st.session_state["fecha_planificador"] += timedelta(days=7)
@@ -349,20 +346,14 @@ elif opcion == "📅 Planificador":
     lista_nombres_recetas = [""] + list(opciones_recetas.keys())
 
     # 2. Definimos las columnas: 7 para los días y 1 para la leyenda
-    # Ajustamos pesos: los días necesitan más espacio que la leyenda
     columnas = st.columns([0.8, 1, 1, 1, 1, 1, 1, 1])
-
-
 
     dias_nombres = ["Momentos", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
-    # 3. Dibujamos la LEYENDA en la última columna
+    # 3. Dibujamos la LEYENDA (Momentos)
     with columnas[0]:
-        # ESPACIADOR: Este bloque vacío hace que la leyenda baje y se alinee con los selectores
         st.markdown('<div style="height:80px;margin-top:1px;"></div>', unsafe_allow_html=True)
-
         for momento, emoji in momentos_config.items():
-            # Usamos st.info o un markdown personalizado para que tenga la misma altura que un selectbox
             st.markdown(f"""
                     <div style="height:38px; display:flex; align-items:center; background-color:#e1f5fe; border-radius:5px; padding-left:10px; margin-bottom:18px; border: 1px solid #b3e5fc;">
                         <span style="font-size:0.9em;">{emoji} <b>{momento}</b></span>
@@ -370,15 +361,15 @@ elif opcion == "📅 Planificador":
                 """, unsafe_allow_html=True)
 
     # 4. Dibujamos los 7 días
-    for i in range(1, 8):
+    for i in range(7):
         current_date = start_of_week + timedelta(days=i)
         date_str = str(current_date)
 
-        with columnas[i]:
-            # Encabezado del día
+        with columnas[i + 1]:
+            # Encabezado del día (usamos i+1 para sacar el nombre del día Lunes, Martes...)
             st.markdown(f"""
                 <div style="background-color:#f0f2f6; padding:10px; border-radius:5px; text-align:center; height:70px; margin-bottom:10px; display:flex; flex-direction:column; justify-content:center;">
-                    <p style="margin:0; font-weight:bold; line-height:1.2;">{dias_nombres[i]}</p>
+                    <p style="margin:0; font-weight:bold; line-height:1.2;">{dias_nombres[i + 1]}</p>
                     <p style="margin:0; font-size:0.8em;">{current_date.strftime('%d/%m')}</p>
                 </div>
             """, unsafe_allow_html=True)
@@ -400,8 +391,6 @@ elif opcion == "📅 Planificador":
                 if seleccion != val_actual:
                     db.save_meal_plan(current_date, momento, opciones_recetas.get(seleccion))
                     st.rerun()
-
-
 
 # ----------------------------------------
 # VISTA: COMPRA
