@@ -17,7 +17,6 @@ def change_date(dias=0, nueva_fecha=None):
     from datetime import timedelta
     base = nueva_fecha if nueva_fecha else st.session_state["fecha_global"] + timedelta(days=dias)
     st.session_state["fecha_global"] = logic.get_start_of_week(base)
-    st.rerun()
 
 # 3. Sidebar y Seguridad
 st.sidebar.divider()

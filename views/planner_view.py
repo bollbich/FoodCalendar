@@ -2,16 +2,6 @@ import streamlit as st
 from datetime import timedelta
 from src import db, logic
 
-def change_date(dias=0, nueva_fecha=None):
-    if nueva_fecha is not None:
-        base = nueva_fecha
-    else:
-        base = st.session_state["fecha_global"] + timedelta(days=dias)
-
-    st.session_state["fecha_global"] = logic.get_start_of_week(base)
-
-def get_start_of_week(dt):
-    return dt - timedelta(days=dt.weekday())
 
 def show_planner_page(es_editor, change_date):
     st.header("Planificación Semanal")
@@ -22,6 +12,7 @@ def show_planner_page(es_editor, change_date):
     with col_nav1:
         if st.button("⬅️ Semana Anterior", key="btn_prev_plan", use_container_width=True, disabled=not es_editor):
             change_date(dias=-7)
+            st.rerun()
 
     with col_nav2:
         def update_plan_date():
@@ -38,6 +29,7 @@ def show_planner_page(es_editor, change_date):
     with col_nav3:
         if st.button("Semana Siguiente ➡️", key="btn_next_plan", use_container_width=True, disabled=not es_editor):
             change_date(dias=7)
+            st.rerun()
 
     # Usamos la fecha global para calcular la semana
     start_of_week = logic.get_start_of_week(st.session_state["fecha_global"])

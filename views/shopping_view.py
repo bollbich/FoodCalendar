@@ -12,6 +12,7 @@ def show_shopping_list_page(change_date):
     with c_nav1:
         if st.button("⬅️ Anterior", key="btn_prev_compra", use_container_width=True):
             change_date(dias=-7)
+            st.rerun()
 
     with c_nav2:
         def update_compra_date():
@@ -27,6 +28,7 @@ def show_shopping_list_page(change_date):
     with c_nav3:
         if st.button("Siguiente ➡️", key="btn_next_compra", use_container_width=True):
             change_date(dias=7)
+            st.rerun()
 
     # --- 2. LÓGICA DE DATOS ---
     start_w = logic.get_start_of_week(st.session_state["fecha_global"])
