@@ -48,30 +48,6 @@ else:
         disabled=True
     )
 st.sidebar.divider()
-st.sidebar.subheader("Seguridad")
-st.sidebar.divider()
-# --- MANTENIMIENTO (Solo visible para editores) ---
-if es_editor:
-    with st.sidebar.expander("⚙️ Mantenimiento Avanzado"):
-        # Botón de Descarga
-        try:
-            with open("data/planner.db", "rb") as f:
-                st.download_button(
-                    label="📥 Copia de Seguridad (.db)",
-                    data=f,
-                    file_name=f"backup_planner_{date.today()}.db",
-                    mime="application/x-sqlite3"
-                )
-        except FileNotFoundError:
-            st.error("Archivo DB no encontrado")
-
-        st.divider()
-        st.warning("Zona de Peligro")
-        confirmar = st.checkbox("Confirmar limpieza total")
-        if st.button("🗑️ Borrar Historial", disabled=not confirmar, key="btn_reset_sidebar"):
-            if db.reset_historical_data():
-                st.success("Historial borrado")
-                st.rerun()
 
 # 4. Enrutador (Router)
 if opcion == "📅 Planificador":
