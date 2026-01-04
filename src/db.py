@@ -1,181 +1,224 @@
-import sqlite3
+import psycopg2
+import streamlit as st
+import os
 
-DB_PATH = 'data/planner.db'
+
+# --- CONEXIÓN A LA BASE DE DATOS (SUPABASE) ---
+def get_connection():
+    try:
+        # Intentamos obtener la cadena de los secretos
+        conn_str = st.secrets["db"]["connection_string"]
+        return psycopg2.connect(conn_str, connect_timeout=5) # Timeout de 5 seg
+    except KeyError:
+        st.error("❌ No se encontró 'connection_string' en secrets.toml. Revisa los corchetes [db].")
+    except psycopg2.OperationalError as e:
+        st.error(f"❌ Error de red: No se puede alcanzar Supabase. Detalles: {e}")
+    except Exception as e:
+        st.error(f"❌ Error inesperado: {e}")
+    return None
 
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # Habilitar foreign keys
-    c.execute("PRAGMA foreign_keys = ON")
+    """Inicializa las tablas en PostgreSQL si no existen."""
+    conn = get_connection()
+    if not conn: return
 
-    # 1. Tabla de Ingredientes Únicos
-    c.execute('''CREATE TABLE IF NOT EXISTS ingredientes
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  categoria TEXT DEFAULT 'Otros',
-                  nombre TEXT UNIQUE)''')
+    try:
+        c = conn.cursor()
 
-    # 2. Tabla de Recetas
-    c.execute('''CREATE TABLE IF NOT EXISTS recetas
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  nombre TEXT UNIQUE)''')
+        # 1. Tabla de Ingredientes (SERIAL sustituye a AUTOINCREMENT)
+        c.execute('''CREATE TABLE IF NOT EXISTS ingredientes (
+            id SERIAL PRIMARY KEY,
+            categoria TEXT DEFAULT 'Otros',
+            nombre TEXT UNIQUE NOT NULL
+        )''')
 
-    # 3. Tabla Intermedia (Muchos a Muchos)
-    c.execute('''CREATE TABLE IF NOT EXISTS receta_ingredientes
-                 (receta_id INTEGER, 
-                  ingrediente_id INTEGER,
-                  FOREIGN KEY(receta_id) REFERENCES recetas(id) ON DELETE CASCADE,
-                  FOREIGN KEY(ingrediente_id) REFERENCES ingredientes(id) ON DELETE CASCADE,
-                  PRIMARY KEY (receta_id, ingrediente_id))''')
+        # 2. Tabla de Recetas
+        c.execute('''CREATE TABLE IF NOT EXISTS recetas (
+            id SERIAL PRIMARY KEY,
+            nombre TEXT UNIQUE NOT NULL
+        )''')
 
-    # 4. Tabla de Planificación (Calendario)
-    c.execute('''CREATE TABLE IF NOT EXISTS planificacion
-                 (fecha TEXT, 
-                  momento TEXT, 
-                  receta_id INTEGER,
-                  FOREIGN KEY(receta_id) REFERENCES recetas(id) ON DELETE SET NULL,
-                  PRIMARY KEY (fecha, momento))''')
+        # 3. Tabla Intermedia
+        c.execute('''CREATE TABLE IF NOT EXISTS receta_ingredientes (
+            receta_id INTEGER,
+            ingrediente_id INTEGER,
+            FOREIGN KEY(receta_id) REFERENCES recetas(id) ON DELETE CASCADE,
+            FOREIGN KEY(ingrediente_id) REFERENCES ingredientes(id) ON DELETE CASCADE,
+            PRIMARY KEY (receta_id, ingrediente_id)
+        )''')
 
-    conn.commit()
-    conn.close()
+        # 4. Tabla de Planificación
+        # Nota: Usamos DATE para la fecha, aunque TEXT también funcionaría, DATE es mejor en Postgres
+        c.execute('''CREATE TABLE IF NOT EXISTS planificacion (
+            fecha DATE, 
+            momento TEXT, 
+            receta_id INTEGER,
+            FOREIGN KEY(receta_id) REFERENCES recetas(id) ON DELETE SET NULL,
+            PRIMARY KEY (fecha, momento)
+        )''')
+
+        # 5. Tabla de Compras (Inicialización integrada aquí)
+        c.execute('''CREATE TABLE IF NOT EXISTS compras_estado (
+            semana_inicio DATE, 
+            ingrediente_nombre TEXT, 
+            comprado BOOLEAN DEFAULT FALSE,                  
+            PRIMARY KEY (semana_inicio, ingrediente_nombre)
+        )''')
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Error inicializando DB: {e}")
+    finally:
+        conn.close()
 
 
 def run_query(query, params=(), return_data=False):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("PRAGMA foreign_keys = ON")
+    """Ejecuta una query genérica."""
+    conn = get_connection()
+    if not conn: return None
+
     try:
+        c = conn.cursor()
         c.execute(query, params)
         conn.commit()
         if return_data:
             return c.fetchall()
     except Exception as e:
-        print(f"Error DB: {e}")
+        conn.rollback()
+        print(f"Error DB Query: {e}")  # Útil para debug en logs
+        return None
     finally:
         conn.close()
 
 
 # --- GESTIÓN DE INGREDIENTES ---
 def add_ingredient(nombre, categoria="Otros"):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    conn = get_connection()
     try:
-        c.execute("INSERT INTO ingredientes (nombre, categoria) VALUES (?, ?)", (nombre, categoria))
+        c = conn.cursor()
+        # Usamos %s en lugar de ?
+        c.execute("INSERT INTO ingredientes (nombre, categoria) VALUES (%s, %s)", (nombre, categoria))
         conn.commit()
         return True
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
+        conn.rollback()  # Importante hacer rollback si falla
+        return False
+    except Exception:
+        conn.rollback()
         return False
     finally:
         conn.close()
 
 
 def get_all_ingredients():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # Importante: Pedimos ID, nombre y categoria
-    c.execute("SELECT id, nombre, categoria FROM ingredientes ORDER BY nombre ASC")
-    res = c.fetchall()
-    conn.close()
-    return res
+    # El orden se mantiene igual
+    return run_query("SELECT id, nombre, categoria FROM ingredientes ORDER BY nombre ASC", return_data=True) or []
+
 
 def get_ingredients_categories():
     """Devuelve un diccionario con el nombre del ingrediente y su categoría"""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # Intentamos obtener nombre y categoria
-    try:
-        c.execute("SELECT nombre, categoria FROM ingredientes")
-        # Si la categoría es None o vacía, le ponemos "Otros"
-        res = {row[0]: (row[1] if row[1] else "Otros") for row in c.fetchall()}
-    except sqlite3.OperationalError:
-        # Si la columna no existe aún, devolvemos "Otros" para todos
-        c.execute("SELECT nombre FROM ingredientes")
-        res = {row[0]: "Otros" for row in c.fetchall()}
-    conn.close()
-    return res
+    # Simplificado: En Postgres init_db asegura que las columnas existan,
+    # así que no necesitamos el try/except complejo de SQLite
+    data = run_query("SELECT nombre, categoria FROM ingredientes", return_data=True)
+    if data:
+        return {row[0]: (row[1] if row[1] else "Otros") for row in data}
+    return {}
+
 
 def delete_ingredient(ingrediente_id):
-    run_query("DELETE FROM ingredientes WHERE id=?", (ingrediente_id,))
+    run_query("DELETE FROM ingredientes WHERE id=%s", (ingrediente_id,))
+
 
 def update_ingredient(ing_id, new_name, new_cat):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    conn = get_connection()
     try:
+        c = conn.cursor()
         c.execute(
-            "UPDATE ingredientes SET nombre = ?, categoria = ? WHERE id = ?",
+            "UPDATE ingredientes SET nombre = %s, categoria = %s WHERE id = %s",
             (new_name, new_cat, ing_id)
         )
         conn.commit()
         return True
-    except sqlite3.Error:
+    except Exception:
+        conn.rollback()
         return False
     finally:
         conn.close()
 
+
 # --- GESTIÓN DE RECETAS ---
 def ensure_special_recipe(nombre_especial):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # Verificamos si existe
-    c.execute("SELECT id FROM recetas WHERE nombre = ?", (nombre_especial,))
-    if not c.fetchone():
-        # Si no existe, la creamos vacía (sin ingredientes inicialmente)
-        c.execute("INSERT INTO recetas (nombre) VALUES (?)", (nombre_especial,))
-        conn.commit()
-    conn.close()
+    conn = get_connection()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT id FROM recetas WHERE nombre = %s", (nombre_especial,))
+        if not c.fetchone():
+            c.execute("INSERT INTO recetas (nombre) VALUES (%s)", (nombre_especial,))
+            conn.commit()
+    except Exception:
+        conn.rollback()
+    finally:
+        conn.close()
+
 
 def create_recipe(nombre_receta, lista_ids_ingredientes):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    conn = get_connection()
     try:
-        # 1. Crear Receta
-        c.execute("INSERT INTO recetas (nombre) VALUES (?)", (nombre_receta,))
-        receta_id = c.lastrowid
+        c = conn.cursor()
+        # 1. Crear Receta y obtener ID (Diferente a SQLite)
+        # En Postgres usamos "RETURNING id" para obtener el ID generado
+        c.execute("INSERT INTO recetas (nombre) VALUES (%s) RETURNING id", (nombre_receta,))
+        receta_id = c.fetchone()[0]
 
         # 2. Asociar ingredientes
-        for ing_id in lista_ids_ingredientes:
-            c.execute("INSERT INTO receta_ingredientes (receta_id, ingrediente_id) VALUES (?, ?)",
-                      (receta_id, ing_id))
+        if lista_ids_ingredientes:
+            # Opción optimizada: executemany
+            valores = [(receta_id, ing_id) for ing_id in lista_ids_ingredientes]
+            c.executemany("INSERT INTO receta_ingredientes (receta_id, ingrediente_id) VALUES (%s, %s)", valores)
+
         conn.commit()
         return True
     except Exception as e:
-        print(e)
+        conn.rollback()
+        print(f"Error creando receta: {e}")
         return False
     finally:
         conn.close()
 
 
 def delete_recipe(receta_id):
-    # Al borrar receta, el ON DELETE CASCADE borrará las relaciones en receta_ingredientes
-    run_query("DELETE FROM recetas WHERE id=?", (receta_id,))
+    run_query("DELETE FROM recetas WHERE id=%s", (receta_id,))
 
 
 def update_recipe(receta_id, nuevo_nombre, lista_ids_ingredientes):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("PRAGMA foreign_keys = ON")
+    conn = get_connection()
     try:
-        # 1. Actualizar el nombre de la receta
-        c.execute("UPDATE recetas SET nombre = ? WHERE id = ?", (nuevo_nombre, receta_id))
+        c = conn.cursor()
+        # 1. Actualizar nombre
+        c.execute("UPDATE recetas SET nombre = %s WHERE id = %s", (nuevo_nombre, receta_id))
 
-        # 2. Eliminar ingredientes antiguos de esta receta
-        c.execute("DELETE FROM receta_ingredientes WHERE receta_id = ?", (receta_id,))
+        # 2. Eliminar ingredientes antiguos
+        c.execute("DELETE FROM receta_ingredientes WHERE receta_id = %s", (receta_id,))
 
-        # 3. Insertar los nuevos ingredientes seleccionados
-        for ing_id in lista_ids_ingredientes:
-            c.execute("INSERT INTO receta_ingredientes (receta_id, ingrediente_id) VALUES (?, ?)",
-                      (receta_id, ing_id))
+        # 3. Insertar nuevos (usando executemany para eficiencia)
+        if lista_ids_ingredientes:
+            valores = [(receta_id, ing_id) for ing_id in lista_ids_ingredientes]
+            c.executemany("INSERT INTO receta_ingredientes (receta_id, ingrediente_id) VALUES (%s, %s)", valores)
 
         conn.commit()
         return True
     except Exception as e:
+        conn.rollback()
         print(f"Error al actualizar: {e}")
         return False
     finally:
         conn.close()
 
+
 def get_all_recipes():
-    return run_query("SELECT id, nombre FROM recetas ORDER BY nombre", return_data=True)
+    return run_query("SELECT id, nombre FROM recetas ORDER BY nombre", return_data=True) or []
 
 
 def get_recipe_ingredients(receta_id):
@@ -183,80 +226,81 @@ def get_recipe_ingredients(receta_id):
         SELECT i.nombre 
         FROM ingredientes i
         JOIN receta_ingredientes ri ON i.id = ri.ingrediente_id
-        WHERE ri.receta_id = ?
+        WHERE ri.receta_id = %s
     '''
     data = run_query(query, (receta_id,), return_data=True)
-    return [row[0] for row in data]
+    return [row[0] for row in data] if data else []
 
 
 # --- GESTIÓN PLANIFICACIÓN ---
 def save_meal_plan(fecha, momento, receta_id):
-    run_query("INSERT OR REPLACE INTO planificacion (fecha, momento, receta_id) VALUES (?, ?, ?)",
-              (str(fecha), momento, receta_id))
-
+    # Forzamos que la fecha sea un string limpio YYYY-MM-DD
+    fecha_str = str(fecha).strip()
+    query = '''
+        INSERT INTO planificacion (fecha, momento, receta_id) 
+        VALUES (%s, %s, %s)
+        ON CONFLICT (fecha, momento) 
+        DO UPDATE SET receta_id = EXCLUDED.receta_id
+    '''
+    run_query(query, (fecha_str, momento, receta_id))
 
 def get_plan_range_details(start_date, end_date):
-    # Esta query es más compleja porque hace JOINs para traer nombres
+    # Forzamos el formato de fecha para evitar errores de zona horaria o strings mal formados
     query = '''
-        SELECT p.fecha, p.momento, r.id, r.nombre 
+        SELECT p.fecha::text, p.momento, r.id, r.nombre 
         FROM planificacion p
         JOIN recetas r ON p.receta_id = r.id
-        WHERE p.fecha BETWEEN ? AND ?
+        WHERE p.fecha >= %s AND p.fecha <= %s
     '''
-    return run_query(query, (str(start_date), str(end_date)), return_data=True)
+    # Usamos >= y <= en lugar de BETWEEN para mayor claridad en Postgres con fechas
+    data = run_query(query, (str(start_date), str(end_date)), return_data=True)
+    return data if data else []
+
 
 # --- GESTIÓN DE LA LISTA DE LA COMPRA ---
+
 def init_shopping_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # Tabla para guardar el estado (tachado/no tachado) de los ingredientes por semana
-    c.execute('''CREATE TABLE IF NOT EXISTS compras_estado
-                 (semana_inicio TEXT, 
-                  ingrediente_nombre TEXT, 
-                  comprado BOOLEAN,                  
-                  PRIMARY KEY (semana_inicio, ingrediente_nombre))''')
-    conn.commit()
-    conn.close()
+    # Esta función ahora es redundante porque init_db ya crea todas las tablas,
+    # pero la mantenemos por compatibilidad con tu código existente.
+    pass
+
 
 def get_shopping_status(semana_inicio):
-    """Devuelve un diccionario {ingrediente: True/False} para la semana dada"""
-    query = "SELECT ingrediente_nombre, comprado FROM compras_estado WHERE semana_inicio = ?"
+    query = "SELECT ingrediente_nombre, comprado FROM compras_estado WHERE semana_inicio = %s"
     data = run_query(query, (str(semana_inicio),), return_data=True)
-    return {row[0]: bool(row[1]) for row in data}
+    if data:
+        return {row[0]: bool(row[1]) for row in data}
+    return {}
+
 
 def update_shopping_status(semana_inicio, ingrediente, estado):
-    """Guarda si un ingrediente está comprado o no"""
-    query = '''INSERT OR REPLACE INTO compras_estado 
-               (semana_inicio, ingrediente_nombre, comprado) 
-               VALUES (?, ?, ?)'''
+    # Upsert para Postgres
+    query = '''
+        INSERT INTO compras_estado (semana_inicio, ingrediente_nombre, comprado) 
+        VALUES (%s, %s, %s)
+        ON CONFLICT (semana_inicio, ingrediente_nombre) 
+        DO UPDATE SET comprado = EXCLUDED.comprado
+    '''
     run_query(query, (str(semana_inicio), ingrediente, estado))
 
+
 def clear_shopping_status(semana_inicio):
-    """Elimina todos los registros de 'comprado' para una semana concreta"""
-    query = "DELETE FROM compras_estado WHERE semana_inicio = ?"
+    query = "DELETE FROM compras_estado WHERE semana_inicio = %s"
     run_query(query, (str(semana_inicio),))
 
 
 def reset_historical_data():
-    conn = sqlite3.connect(DB_PATH)
-    # Importante: Cambiamos el nivel de aislamiento a None para que VACUUM funcione
-    conn.isolation_level = None
-    c = conn.cursor()
+    conn = get_connection()
     try:
-        # 1. Borramos los datos (Esto sí requiere una transacción manual o auto)
-        c.execute("BEGIN")
-        c.execute("DELETE FROM planificacion")
-        c.execute("DELETE FROM compras_estado")
-        c.execute("COMMIT")
-
-        # 2. Ahora ejecutamos VACUUM fuera de la transacción
-        c.execute("VACUUM")
-
+        c = conn.cursor()
+        # En Postgres, TRUNCATE es más rápido y limpia mejor que DELETE
+        c.execute("TRUNCATE TABLE planificacion")
+        c.execute("TRUNCATE TABLE compras_estado")
+        conn.commit()
         return True
     except Exception as e:
-        if conn:
-            c.execute("ROLLBACK")
-        print(f"Error detallado en DB: {e}")
+        conn.rollback()
+        print(f"Error reseteando datos: {e}")
         return False
     finally:
         conn.close()
