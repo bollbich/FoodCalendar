@@ -41,6 +41,42 @@ def show_planner_page(es_editor, change_date):
     plan_data = db.get_plan_range_details(start_of_week, start_of_week + timedelta(days=6))
     plan_dict = {(fecha, mom): rec_nombre for fecha, mom, _, rec_nombre in plan_data}
 
+    # --- BOTÓN DE COPIAR CON SEGURIDAD ---
+    if es_editor:
+        if st.button("📋 Copiar esta planificación a la semana siguiente", use_container_width=True):
+            # 1. Definir el rango de la semana siguiente
+            start_next = start_of_week + timedelta(days=7)
+            end_next = start_next + timedelta(days=6)
+
+            # 2. Comprobar si ya hay datos allí
+            existing_next_plan = db.get_plan_range_details(start_next, end_next)
+
+            if existing_next_plan:
+                st.error("⚠️ La semana siguiente ya tiene datos. No se ha copiado nada para evitar sobreescribir.")
+                st.info("Borra primero la semana siguiente si quieres copiar esta encima.")
+            elif not plan_data:
+                st.warning("No hay nada que copiar en la semana actual.")
+            else:
+                # 3. Proceder con la copia
+                exitos = 0
+                for fecha_raw, momento, receta_id, _ in plan_data:
+                    if receta_id:
+                        # 1. Convertir a objeto date si es un string
+                        if isinstance(fecha_raw, str):
+                            import datetime as dt
+                            fecha_dt = dt.date.fromisoformat(fecha_raw)
+                        else:
+                            fecha_dt = fecha_raw
+                        # 2. Ahora ya puedes sumar los 7 días
+                        nueva_fecha = fecha_dt + timedelta(days=7)
+                        # 3. Guardar
+                        db.save_meal_plan(nueva_fecha, momento, receta_id)
+                        exitos += 1
+
+                if exitos > 0:
+                    st.success(f"✅ Se han copiado {exitos} comidas con éxito.")
+                    st.rerun()
+
     momentos_config = {
         "Desayuno": "☕",
         "Media Mañana": "🍏",
