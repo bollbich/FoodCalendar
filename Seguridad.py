@@ -395,7 +395,6 @@ elif opcion == "📅 Planificador":
 # ----------------------------------------
 elif opcion == "🛒 Compra":
     st.header("Lista de la Compra")
-    db.init_shopping_db()
 
     # --- NAVEGACIÓN UNIFICADA (Compra) ---
     c_nav1, c_nav2, c_nav3 = st.columns([1, 2, 1])

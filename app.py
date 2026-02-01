@@ -6,8 +6,14 @@ from views import ingredients_view, recipes_view, planner_view, shopping_view
 
 # 1. Inicialización y Configuración
 if not os.path.exists('data'): os.makedirs('data')
-db.init_db()
 st.set_page_config(page_title="Planificador Pro V2", layout="wide", page_icon="🥑")
+db.init_db()
+
+if "modo_operacion" not in st.session_state:
+    st.session_state["modo_operacion"] = "JSON"
+
+db.init_local_data()
+
 
 # 2. Gestión de Fechas
 if "fecha_global" not in st.session_state:
@@ -47,6 +53,33 @@ else:
         ["📅 Planificador"],
         disabled=True
     )
+
+st.sidebar.divider()
+st.sidebar.subheader("🚀 Optimización")
+
+# Selector de Modo (Simplificado)
+modo_actual = st.sidebar.radio(
+    "Fuente de datos:",
+    ["Local (Rápido ⚡)", "Nube (Directo ☁️)"],
+    index=0 if st.session_state["modo_operacion"] == "JSON" else 1
+)
+
+# Cambiamos el modo y LIMPIAMOS CACHÉ para evitar ver datos viejos
+nuevo_modo = "JSON" if "Local" in modo_actual else "QUERY"
+if nuevo_modo != st.session_state["modo_operacion"]:
+    st.session_state["modo_operacion"] = nuevo_modo
+    st.cache_data.clear() # Limpia get_all_ingredients y demás
+    st.rerun()
+
+# Botón de Sincronización (Solo en modo JSON)
+if st.session_state["modo_operacion"] == "JSON" and es_editor:
+    if st.sidebar.button("💾 SUBIR CAMBIOS A LA NUBE", type="primary", use_container_width=True):
+        with st.spinner("Sincronizando..."):
+            if db.sync_to_db(st.session_state.master_json):
+                st.sidebar.success("¡Datos guardados!")
+            else:
+                st.sidebar.error("Error al sincronizar.")
+
 st.sidebar.divider()
 
 # 4. Enrutador (Router)
@@ -61,3 +94,15 @@ elif opcion == "🍅 Ingredientes":
 
 elif opcion == "🛒 Compra":
     shopping_view.show_shopping_list_page(change_date)
+
+with st.sidebar.expander("DEBUG: Estado de Datos"):
+    st.write(f"Modo actual: {st.session_state.get('modo_operacion')}")
+    if "master_json" in st.session_state:
+        st.write(f"Ingredientes: {len(st.session_state.master_json.get('ingredientes', []))}")
+        st.write(f"Recetas: {len(st.session_state.master_json.get('recetas', []))}")
+        st.write(f"Planes guardados: {len(st.session_state.master_json.get('planificacion', []))}")
+    else:
+        st.error("master_json NO INICIALIZADO")
+
+    if "master_json" in st.session_state and len(st.session_state.master_json["planificacion"]) > 0:
+        st.write("Muestra del primer plan guardado:", st.session_state.master_json["planificacion"][0])

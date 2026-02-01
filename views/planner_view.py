@@ -130,8 +130,19 @@ def show_planner_page(es_editor, change_date):
                     index=idx,
                     key=f"plan_{date_str}_{momento}",
                     label_visibility="collapsed",
-                    disabled=not es_editor
+                    disabled=not es_editor,
+                    on_change = handle_selection,
+                    args = (f"plan_{date_str}_{momento}", current_date, momento, opciones_recetas)
                 )
 
                 if seleccion != val_actual:
                     db.save_meal_plan(current_date, momento, opciones_recetas.get(seleccion))
+                    st.rerun()
+
+def handle_selection(key, date_obj, momento_str, receta_dict):
+    nueva_seleccion = st.session_state[key]
+    receta_id = receta_dict.get(nueva_seleccion)
+    # Solo guardamos si hay una receta válida o si se quiere borrar
+    db.save_meal_plan(date_obj, momento_str, receta_id)
+    # Limpiamos la caché de lectura para que al recargar vea el cambio
+    db.get_plan_range_details.clear()
