@@ -87,14 +87,3 @@ elif opcion == "🍅 Ingredientes":
 
 elif opcion == "🛒 Compra":
     shopping_view.show_shopping_list_page(change_date)
-
-# 6. Debugging (Opcional, expander en el sidebar)
-with st.sidebar.expander("🛠️ Debugging Info"):
-    st.write(f"**Modo:** {st.session_state['modo_datos']}")
-    try:
-        num_recetas = len(db.get_all_recipes())
-        num_ing = len(db.get_all_ingredients())
-        st.write(f"Recetas cargadas: {num_recetas}")
-        st.write(f"Ingredientes cargados: {num_ing}")
-    except Exception as e:
-        st.error(f"Error consultando DB: {e}")
