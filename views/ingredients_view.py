@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from src import db
 
+
 def show_ingredients_page(es_editor):
     st.header("Gestión de la Despensa")
 
@@ -34,7 +35,7 @@ def show_ingredients_page(es_editor):
                     "🥫 Despensa", "🧼 Limpieza", "❄️ Congelados", "Otros"
                 ], key="nueva_cat_sel")
 
-            st.button("Añadir a la lista", on_click=save_new_ingredient)
+            st.button("Añadir a la lista", on_click=save_new_ingredient, use_container_width=True)
 
     # --- TAB 2: EDITAR Y LISTADO ---
     with tab2:
@@ -71,33 +72,40 @@ def show_ingredients_page(es_editor):
 
                 if indices:
                     row_idx = indices[0]
-                    id_i = int(df_ings.iloc[row_idx]["ID"])
-                    nombre_i = df_ings.iloc[row_idx]["Nombre"]
-                    cat_i = df_ings.iloc[row_idx]["Categoría"]
 
-                    with st.form(key=f"form_side_edit_{id_i}"):
-                        nuevo_nom = st.text_input("Nombre", value=nombre_i, disabled=not es_editor)
+                    if row_idx < len(df_ings):
+                        id_i = int(df_ings.iloc[row_idx]["ID"])
+                        nombre_i = df_ings.iloc[row_idx]["Nombre"]
+                        cat_i = df_ings.iloc[row_idx]["Categoría"]
 
-                        try:
-                            idx_cat = lista_categorias.index(cat_i)
-                        except:
-                            idx_cat = lista_categorias.index("Otros")
+                        with st.form(key=f"form_edit_ing_{id_i}"):
+                            nuevo_nom = st.text_input("Nombre", value=nombre_i, disabled=not es_editor)
 
-                        nueva_cat = st.selectbox("Categoría", options=lista_categorias, index=idx_cat, disabled=not es_editor)
+                            try:
+                                idx_cat = lista_categorias.index(cat_i)
+                            except:
+                                idx_cat = lista_categorias.index("Otros")
 
-                        if es_editor:
-                            c1, c2 = st.columns(2)
-                            if c1.form_submit_button("💾 Guardar", use_container_width=True):
-                                if nuevo_nom:
-                                    db.update_ingredient(id_i, nuevo_nom, nueva_cat)
-                                    st.toast(f"✅ {nuevo_nom} actualizado")
+                            nueva_cat = st.selectbox("Categoría", options=lista_categorias, index=idx_cat,
+                                                     disabled=not es_editor)
+
+                            if es_editor:
+                                c1, c2 = st.columns(2)
+                                if c1.form_submit_button("💾 Guardar", use_container_width=True):
+                                    if nuevo_nom:
+                                        db.update_ingredient(id_i, nuevo_nom, nueva_cat)
+                                        st.toast(f"✅ {nuevo_nom} actualizado")
+                                        st.rerun()
+
+                                if c2.form_submit_button("🗑️ Borrar", use_container_width=True):
+                                    db.delete_ingredient(id_i)
+                                    st.warning("Eliminado correctamente")
+                                    st.cache_data.clear()
                                     st.rerun()
-
-                            if c2.form_submit_button("🗑️ Borrar", use_container_width=True):
-                                db.delete_ingredient(id_i)
-                                st.warning("Eliminado")
-                                st.rerun()
-                        else:
-                            st.info("Modo lectura: No se permiten cambios.")
+                            else:
+                                st.info("Modo lectura: No se permiten cambios.")
+                    else:
+                        st.info("Actualizando información...")
+                        st.rerun()
                 else:
-                    st.info("👈 Selecciona un ingrediente de la lista.")
+                    st.info("👈 Selecciona un ingrediente en la tabla para editarlo.")
