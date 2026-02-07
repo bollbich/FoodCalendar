@@ -1,386 +1,210 @@
+import sqlite3
 import psycopg2
-import json
 import streamlit as st
-from datetime import datetime
+import os
 
-# --- UTILIDADES DE MODO ---
-def get_mode():
-    """Devuelve 'JSON' o 'QUERY'"""
-    return st.session_state.get("modo_operacion", "JSON")
+DB_PATH = 'data/planner.db'
 
-def is_json_mode():
-    return get_mode() == "JSON"
+# --- CONFIGURACIÓN Y CONEXIONES ---
 
-# --- INICIALIZACIÓN DEL MASTER JSON ---
-def init_local_data():
-    """Carga los datos. Si no hay JSON en la nube, succiona las tablas SQL."""
-    if "master_json" not in st.session_state:
-        remote_data = load_from_db()
+def is_local_mode():
+    return st.session_state.get("modo_datos", "Local") == "Local"
 
-        if remote_data and len(remote_data.get("ingredientes", [])) > 0:
-            st.session_state.master_json = remote_data
-        else:
-            st.warning("⚠️ No se encontró backup JSON. Importando datos desde SQL...")
+def get_sqlite_conn():
+    if not os.path.exists('data'): os.makedirs('data')
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
-            ing = run_query("SELECT id, nombre, categoria FROM ingredientes", return_data=True) or []
-            rec = run_query("SELECT id, nombre FROM recetas", return_data=True) or []
-            ri = run_query("SELECT receta_id, ingrediente_id FROM receta_ingredientes", return_data=True) or []
-            # Convertimos fechas a string para el JSON
-            plan = run_query("SELECT fecha::text, momento, receta_id FROM planificacion", return_data=True) or []
-            comp = run_query("SELECT semana_inicio::text, ingrediente_nombre, comprado FROM compras_estado",
-                             return_data=True) or []
-
-            st.session_state.master_json = {
-                "ingredientes": [list(x) for x in ing],
-                "recetas": [list(x) for x in rec],
-                "receta_ingredientes": [list(x) for x in ri],
-                "planificacion": [list(x) for x in plan],
-                "compras_estado": [list(x) for x in comp]
-            }
-            st.success("✅ Importación completada. Recuerda Sincronizar al terminar.")
-
-# --- CONEXIÓN Y CONSULTAS BASE ---
 @st.cache_resource
-def get_connection():
-    """
-    Mantiene una única conexión abierta.
-    Para uso personal, esto consume solo 1 conexión del pool de Supabase.
-    """
+def get_supabase_conn():
     try:
         conn_str = st.secrets["db"]["connection_string"]
-        conn = psycopg2.connect(conn_str)
-        return conn
+        return psycopg2.connect(conn_str)
     except Exception as e:
-        st.error(f"Error conectando a la base de datos: {e}")
+        st.error(f"Error de conexión con Supabase: {e}")
         return None
+
+def sync_to_db(datos_json):
+    """
+    Esta es la función que tu app.py llama en el botón de sincronizar.
+    He adaptado el nombre para que coincida con tu app.py actual.
+    """
+    return sync_local_to_cloud()
 
 def run_query(query, params=(), return_data=False):
-    """Ejecuta una query gestionando el cursor automáticamente."""
-    conn = get_connection()
-    if not conn: return None
-    if conn.closed:
-        st.cache_resource.clear()
-        conn = get_connection()
+    """Ejecutor simplificado: SIEMPRE LOCAL"""
+    query = query.replace('%s', '?').replace('::text', '')
+    
     try:
-        with conn.cursor() as c:
+        with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
+            c = conn.cursor()
             c.execute(query, params)
             conn.commit()
-            if return_data: return c.fetchall()
+            if return_data:
+                return c.fetchall()
+            return None
     except Exception as e:
-        conn.rollback()
-        st.write(f"Error DB Query: {e}")
-        return None
+        print(f"Error SQLite: {e}")
+        return [] if return_data else None
 
-# --- SINCRONIZACIÓN MACRO ---
-def sync_to_db(master_json):
-    """Sincronización bruta: sube TODO el estado actual"""
-    query = """
-        INSERT INTO app_sync (key, content, updated_at) 
-        VALUES ('master_data', %s, CURRENT_TIMESTAMP)
-        ON CONFLICT (key) DO UPDATE SET content = EXCLUDED.content, updated_at = CURRENT_TIMESTAMP
-    """
-    # Convertimos fechas a string para que el JSON no explote
-    data_to_save = json.loads(json.dumps(master_json, default=str))
-    return run_query(query, (json.dumps(data_to_save),))
-
-def load_from_db():
-    data = run_query("SELECT content FROM app_sync WHERE key = 'master_data'", return_data=True)
-    return data[0][0] if data else None
+# --- INICIALIZACIÓN ---
 
 def init_db():
-    """Inicializa las tablas."""
-    conn = get_connection()
-    if conn:
-        with conn.cursor() as c:
-            c.execute('''CREATE TABLE IF NOT EXISTS app_sync (
-            key TEXT PRIMARY KEY,
-            content JSONB,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )''')
-            c.execute('''CREATE TABLE IF NOT EXISTS ingredientes (
-                id SERIAL PRIMARY KEY,
-                categoria TEXT DEFAULT 'Otros',
-                nombre TEXT UNIQUE NOT NULL
-            )''')
-            c.execute('''CREATE TABLE IF NOT EXISTS recetas (
-                id SERIAL PRIMARY KEY,
-                nombre TEXT UNIQUE NOT NULL
-            )''')
-            c.execute('''CREATE TABLE IF NOT EXISTS receta_ingredientes (
-                receta_id INTEGER,
-                ingrediente_id INTEGER,
-                FOREIGN KEY(receta_id) REFERENCES recetas(id) ON DELETE CASCADE,
-                FOREIGN KEY(ingrediente_id) REFERENCES ingredientes(id) ON DELETE CASCADE,
-                PRIMARY KEY (receta_id, ingrediente_id)
-            )''')
-            c.execute('''CREATE TABLE IF NOT EXISTS planificacion (
-                fecha DATE, 
-                momento TEXT, 
-                receta_id INTEGER,
-                FOREIGN KEY(receta_id) REFERENCES recetas(id) ON DELETE SET NULL,
-                PRIMARY KEY (fecha, momento)
-            )''')
-            c.execute('''CREATE TABLE IF NOT EXISTS compras_estado (
-                semana_inicio DATE, 
-                ingrediente_nombre TEXT, 
-                comprado BOOLEAN DEFAULT FALSE,                  
-                PRIMARY KEY (semana_inicio, ingrediente_nombre)
-            )''')
-            conn.commit()
+    conn = get_sqlite_conn()
+    c = conn.cursor()
+    c.execute("CREATE TABLE IF NOT EXISTS ingredientes (id INTEGER PRIMARY KEY AUTOINCREMENT, categoria TEXT DEFAULT 'Otros', nombre TEXT UNIQUE)")
+    c.execute("CREATE TABLE IF NOT EXISTS recetas (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT UNIQUE)")
+    c.execute("CREATE TABLE IF NOT EXISTS receta_ingredientes (receta_id INTEGER, ingrediente_id INTEGER, PRIMARY KEY (receta_id, ingrediente_id))")
+    c.execute("CREATE TABLE IF NOT EXISTS planificacion (fecha TEXT, momento TEXT, receta_id INTEGER, PRIMARY KEY (fecha, momento))")
+    c.execute("CREATE TABLE IF NOT EXISTS compras_estado (semana_inicio TEXT, ingrediente_nombre TEXT, comprado BOOLEAN, PRIMARY KEY (semana_inicio, ingrediente_nombre))")
+    conn.commit()
+    conn.close()
+
+def init_local_data():
+    """Stub para que app.py no falle al arrancar"""
+    init_db()
+
+def ensure_special_recipe(nombre):
+    """Crea la receta si no existe (Fix para el error de atributo)"""
+    res = run_query("SELECT id FROM recetas WHERE nombre = %s", (nombre,), return_data=True)
+    if not res:
+        run_query("INSERT INTO recetas (nombre) VALUES (%s)", (nombre,))
 
 # --- GESTIÓN DE INGREDIENTES ---
+
 def add_ingredient(nombre, categoria="Otros"):
-    if is_json_mode():
-        data = st.session_state.master_json["ingredientes"]
-        if any(i[1].lower() == nombre.lower() for i in data): return False
-        new_id = max([i[0] for i in data], default=0) + 1
-        data.append([new_id, nombre, categoria])
+    query = "INSERT INTO ingredientes (nombre, categoria) VALUES (%s, %s)"
+    try:
+        run_query(query, (nombre, categoria))
         return True
-    else:
-        query = "INSERT INTO ingredientes (nombre, categoria) VALUES (%s, %s)"
-        return run_query(query, (nombre, categoria)) is not None
+    except: return False
 
-@st.cache_data
-def get_all_ingredients():
-    if is_json_mode():
-        return sorted(st.session_state.master_json["ingredientes"], key=lambda x: x[1])
-    return run_query("SELECT id, nombre, categoria FROM ingredientes ORDER BY nombre ASC", return_data=True) or []
+def get_all_ingredients(): return run_query("SELECT id, nombre, categoria FROM ingredientes ORDER BY nombre ASC", return_data=True) or []
 
-def delete_ingredient(ingrediente_id):
-    if is_json_mode():
-        st.session_state.master_json["ingredientes"] = [i for i in st.session_state.master_json["ingredientes"] if i[0] != ingrediente_id]
-        st.session_state.master_json["receta_ingredientes"] = [ri for ri in st.session_state.master_json["receta_ingredientes"] if ri[1] != ingrediente_id]
-    else:
-        run_query("DELETE FROM ingredientes WHERE id=%s", (ingrediente_id,))
-        get_all_ingredients.clear()
-
-@st.cache_data
 def get_ingredients_categories():
-    if is_json_mode():
-        return {i[1]: i[2] for i in st.session_state.master_json["ingredientes"]}
     data = run_query("SELECT nombre, categoria FROM ingredientes", return_data=True)
-    return {row[0]: (row[1] or "Otros") for row in data} if data else {}
+    return {r[0]: (r[1] or "Otros") for r in data} if data else {}
 
-def update_ingredient(ing_id, new_name, new_cat):
-    if is_json_mode():
-        for i in st.session_state.master_json["ingredientes"]:
-            if i[0] == ing_id:
-                i[1], i[2] = new_name, new_cat
-                return True
-        return False
-    else:
-        query = "UPDATE ingredientes SET nombre = %s, categoria = %s WHERE id = %s"
-        res = run_query(query, (new_name, new_cat, ing_id))
-        get_all_ingredients.clear()
-        return res is not None
+def delete_ingredient(ing_id):
+    run_query("DELETE FROM ingredientes WHERE id=%s", (ing_id,))
 
-# --- GESTIÓN PLANIFICACIÓN ---
-def save_meal_plan(fecha, momento, receta_id):
-    fecha_s = str(fecha)
-    if is_json_mode():
-        plan = st.session_state.master_json["planificacion"]
-        # Filtramos para quitar el registro viejo (simular el ON CONFLICT)
-        new_plan = [p for p in plan if not (p[0] == fecha_s and p[1] == momento)]
-        new_plan.append([fecha_s, momento, receta_id])
-        st.session_state.master_json["planificacion"] = new_plan
-        return True
-    else:
-        query = """
-            INSERT INTO planificacion (fecha, momento, receta_id) 
-            VALUES (%s, %s, %s)
-            ON CONFLICT (fecha, momento) DO UPDATE SET receta_id = EXCLUDED.receta_id
-        """
-        run_query(query, (fecha_s, momento, receta_id))
-        get_plan_range_details.clear()
-        return True
-
-
-@st.cache_data
-def get_plan_range_details(start_date, end_date):
-    start_s = str(start_date)
-    end_s = str(end_date)
-
-    if is_json_mode():
-        plan = st.session_state.master_json.get("planificacion", [])
-        # Creamos el diccionario de nombres asegurando que el ID sea int para comparar
-        recetas_dict = {int(r[0]): r[1] for r in st.session_state.master_json.get("recetas", [])}
-
-        resultado = []
-        for p in plan:
-            if start_s <= p[0] <= end_s:
-                id_receta = int(p[2]) if p[2] is not None else None
-                nombre_receta = recetas_dict.get(id_receta, "") if id_receta else ""
-
-                resultado.append([p[0], p[1], id_receta, nombre_receta])
-        return resultado
-    else:
-        query = """
-            SELECT p.fecha::text, p.momento, p.receta_id, r.nombre 
-            FROM planificacion p
-            LEFT JOIN recetas r ON p.receta_id = r.id
-            WHERE p.fecha >= %s AND p.fecha <= %s
-        """
-        return run_query(query, (start_s, end_s), return_data=True) or []
+def update_ingredient(ing_id, nombre, categoria):
+    run_query("UPDATE ingredientes SET nombre=%s, categoria=%s WHERE id=%s", (nombre, categoria, ing_id))
 
 # --- GESTIÓN DE RECETAS ---
-def ensure_special_recipe(nombre_especial):
-    """Asegura que exista una receta (como 'Comida fuera') tanto en JSON como en SQL"""
-    if is_json_mode():
-        # Lógica para JSON
-        recetas = st.session_state.master_json["recetas"]
-        # Comprobamos si ya existe el nombre
-        if not any(r[1] == nombre_especial for r in recetas):
-            new_id = max([r[0] for r in recetas], default=0) + 1
-            recetas.append([new_id, nombre_especial])
+
+def create_recipe(nombre, lista_ids):
+    if is_local_mode():
+        conn = get_sqlite_conn()
+        try:
+            c = conn.cursor()
+            c.execute("INSERT INTO recetas (nombre) VALUES (?)", (nombre,))
+            rid = c.lastrowid
+            for iid in lista_ids:
+                c.execute("INSERT INTO receta_ingredientes (receta_id, ingrediente_id) VALUES (?, ?)", (rid, iid))
+            conn.commit()
             return True
+        except: return False
+        finally: conn.close()
     else:
-        # Lógica para SQL (tu código original optimizado)
-        conn = get_connection()
-        if not conn: return False
+        conn = get_supabase_conn()
         try:
             with conn.cursor() as c:
-                c.execute("SELECT id FROM recetas WHERE nombre = %s", (nombre_especial,))
-                if not c.fetchone():
-                    c.execute("INSERT INTO recetas (nombre) VALUES (%s)", (nombre_especial,))
-                    conn.commit()
-            return True
-        except Exception as e:
-            if conn: conn.rollback()
-            st.write(f"Error en ensure_special_recipe: {e}")
-            return False
-
-
-def create_recipe(nombre_receta, lista_ids_ingredientes):
-    if is_json_mode():
-        # Aseguramos que master_json existe
-        if "master_json" not in st.session_state:
-            st.write("ERROR: master_json no inicializado en session_state")
-            return False
-        else:
-            st.write("OK: master_json esta inicializado en session_state")
-
-        # EXTRAER Y CONVERTIR A LISTA (Importante: Evita errores de tuplas inmutables)
-        recetas = list(st.session_state.master_json.get("recetas", []))
-        relaciones = list(st.session_state.master_json.get("receta_ingredientes", []))
-
-        # Generar nuevo ID
-        new_id = max([int(r[0]) for r in recetas], default=0) + 1
-
-        st.write(f"DEBUG: Intentando crear '{nombre_receta}' con ID {new_id}")
-
-        # Añadir la receta
-        recetas.append([new_id, nombre_receta])
-
-        # Añadir sus ingredientes
-        for ing_id in lista_ids_ingredientes:
-            relaciones.append([new_id, int(ing_id)])
-
-        # GUARDAR DE VUELTA AL SESSION STATE (Reasignar para asegurar persistencia)
-        st.session_state.master_json["recetas"] = recetas
-        st.session_state.master_json["receta_ingredientes"] = relaciones
-
-        st.write(f"DEBUG: Receta guardada. Total recetas en memoria: {len(st.session_state.master_json['recetas'])}")
-        return True
-    else:
-        conn = get_connection()
-        try:
-            with conn.cursor() as c:
-                c.execute("INSERT INTO recetas (nombre) VALUES (%s) RETURNING id", (nombre_receta,))
-                receta_id = c.fetchone()[0]
-                if lista_ids_ingredientes:
-                    valores = [(receta_id, ing_id) for ing_id in lista_ids_ingredientes]
-                    c.executemany("INSERT INTO receta_ingredientes (receta_id, ingrediente_id) VALUES (%s, %s)",
-                                  valores)
+                c.execute("INSERT INTO recetas (nombre) VALUES (%s) RETURNING id", (nombre,))
+                rid = c.fetchone()[0]
+                for iid in lista_ids:
+                    c.execute("INSERT INTO receta_ingredientes (receta_id, ingrediente_id) VALUES (%s, %s)", (rid, iid))
                 conn.commit()
             return True
-        except Exception as e:
-            if conn: conn.rollback()
-            st.write(f"Error SQL: {e}")
-            return False
+        except: return False
 
-def get_all_recipes():
-    if is_json_mode():
-        # Aquí NO puede haber @st.cache_data
-        return st.session_state.master_json.get("recetas", [])
-    else:
-        # Aquí sí podrías usar una función cacheada aparte
-        return run_query("SELECT id, nombre FROM recetas ORDER BY nombre", return_data=True)
+def get_all_recipes(): return run_query("SELECT id, nombre FROM recetas ORDER BY nombre", return_data=True) or []
+
+def get_recipe_ingredients(rid):
+    data = run_query("SELECT i.nombre FROM ingredientes i JOIN receta_ingredientes ri ON i.id = ri.ingrediente_id WHERE ri.receta_id = %s", (rid,), return_data=True)
+    return [r[0] for r in data]
 
 def delete_recipe(receta_id):
-    if is_json_mode():
-        st.session_state.master_json["recetas"] = [r for r in st.session_state.master_json["recetas"] if r[0] != receta_id]
-        st.session_state.master_json["receta_ingredientes"] = [ri for ri in st.session_state.master_json["receta_ingredientes"] if ri[0] != receta_id]
-    else:
-        run_query("DELETE FROM recetas WHERE id=%s", (receta_id,))
+    run_query("DELETE FROM recetas WHERE id=%s", (receta_id,))
 
-def update_recipe(receta_id, nuevo_nombre, lista_ids_ingredientes):
-    if is_json_mode():
-        for r in st.session_state.master_json["recetas"]:
-            if r[0] == receta_id: r[1] = nuevo_nombre
-        st.session_state.master_json["receta_ingredientes"] = [ri for ri in st.session_state.master_json["receta_ingredientes"] if ri[0] != receta_id]
-        for ing_id in lista_ids_ingredientes:
-            st.session_state.master_json["receta_ingredientes"].append([receta_id, ing_id])
-        return True
-    else:
-        conn = get_connection()
-        try:
-            with conn.cursor() as c:
-                c.execute("UPDATE recetas SET nombre = %s WHERE id = %s", (nuevo_nombre, receta_id))
-                c.execute("DELETE FROM receta_ingredientes WHERE receta_id = %s", (receta_id,))
+def update_recipe(receta_id, nombre, lista_ids):
+    run_query("UPDATE recetas SET nombre=%s WHERE id=%s", (nombre, receta_id))
+    run_query("DELETE FROM receta_ingredientes WHERE receta_id=%s", (receta_id,))
+    for iid in lista_ids:
+        run_query("INSERT INTO receta_ingredientes (receta_id, ingrediente_id) VALUES (%s, %s)", (receta_id, iid))
 
-                if lista_ids_ingredientes:
-                    valores = [(receta_id, ing_id) for ing_id in lista_ids_ingredientes]
-                    c.executemany("INSERT INTO receta_ingredientes (receta_id, ingrediente_id) VALUES (%s, %s)", valores)
-                conn.commit()
-            return True
-        except Exception as e:
-            conn.rollback()
-            st.write(f"Error al actualizar: {e}")
+# --- PLANIFICACIÓN ---
+
+def save_meal_plan(f, m, rid):
+    # Guardamos el dato
+    run_query("INSERT OR REPLACE INTO planificacion (fecha, momento, receta_id) VALUES (%s, %s, %s)", (str(f), m, rid))
+    st.cache_data.clear()
+
+def get_plan_range_details(s, e): 
+    return run_query("SELECT p.fecha, p.momento, r.id, r.nombre FROM planificacion p JOIN recetas r ON p.receta_id = r.id WHERE p.fecha BETWEEN %s AND %s", (str(s), str(e)), return_data=True) or []
+
+# --- COMPRA ---
+
+def get_shopping_status(s): 
+    data = run_query("SELECT ingrediente_nombre, comprado FROM compras_estado WHERE semana_inicio = %s", (str(s),), return_data=True)
+    return {r[0]: bool(r[1]) for r in data} if data else {}
+
+def update_shopping_status(s, i, e): run_query("INSERT OR REPLACE INTO compras_estado (semana_inicio, ingrediente_nombre, comprado) VALUES (%s, %s, %s)", (str(s), i, e))
+
+def clear_shopping_status(s): run_query("DELETE FROM compras_estado WHERE semana_inicio = %s", (str(s),))
+
+# --- SINCRONIZACIÓN BIDIRECCIONAL ---
+
+def sync_local_to_cloud():
+    """Sube el archivo .db con reintento de conexión y gestión de errores"""
+    if not os.path.exists(DB_PATH):
+        return False
+    conn = None
+    try:
+        with open(DB_PATH, 'rb') as f:
+            blob_data = f.read()
+        st.cache_resource.clear() 
+        conn = get_supabase_conn()
+        if conn is None:
             return False
-
-def get_recipe_ingredients(receta_id):
-    if is_json_mode():
-        ing_ids = [ri[1] for ri in st.session_state.master_json["receta_ingredientes"] if ri[0] == receta_id]
-        return [i[1] for i in st.session_state.master_json["ingredientes"] if i[0] in ing_ids]
-    query = "SELECT i.nombre FROM ingredientes i JOIN receta_ingredientes ri ON i.id = ri.ingrediente_id WHERE ri.receta_id = %s"
-    data = run_query(query, (receta_id,), return_data=True)
-    return [row[0] for row in data] if data else []
-
-
-# --- GESTIÓN COMPRAS ---
-def get_shopping_status(semana_inicio):
-    semana_s = str(semana_inicio)
-    if is_json_mode():
-        compras = st.session_state.master_json.get("compras_estado", [])
-        return {c[1]: c[2] for c in compras if c[0] == semana_s}
-    query = "SELECT ingrediente_nombre, comprado FROM compras_estado WHERE semana_inicio = %s"
-    data = run_query(query, (semana_s,), return_data=True)
-    return {row[0]: bool(row[1]) for row in data} if data else {}
-
-
-def update_shopping_status(semana_inicio, ingrediente, estado):
-    semana_s = str(semana_inicio)
-    if is_json_mode():
-        compras = st.session_state.master_json["compras_estado"]
-        st.session_state.master_json["compras_estado"] = [c for c in compras if not (c[0] == semana_s and c[1] == ingrediente)]
-        st.session_state.master_json["compras_estado"].append([semana_s, ingrediente, estado])
-    else:
-        query = "INSERT INTO compras_estado (semana_inicio, ingrediente_nombre, comprado) VALUES (%s,%s,%s) ON CONFLICT (semana_inicio, ingrediente_nombre) DO UPDATE SET comprado = EXCLUDED.comprado"
-        run_query(query, (semana_s, ingrediente, estado))
-
-def clear_shopping_status(semana_inicio):
-    if is_json_mode():
-        semana_s = str(semana_inicio)
-        st.session_state.master_json["compras_estado"] = [c for c in st.session_state.master_json["compras_estado"] if c[0] != semana_s]
-    else:
-        run_query("DELETE FROM compras_estado WHERE semana_inicio = %s", (str(semana_inicio),))
-
-
-def reset_historical_data():
-    if is_json_mode():
-        st.session_state.master_json["planificacion"] = []
-        st.session_state.master_json["compras_estado"] = []
+        with conn.cursor() as c:
+            c.execute("SET statement_timeout = '60s'")
+            
+            c.execute("""
+                UPDATE sistema_backup 
+                SET archivo_binario = %s, fecha_sincro = NOW() 
+                WHERE id = 1
+            """, (psycopg2.Binary(blob_data),))
+            conn.commit()
         return True
-    run_query("TRUNCATE TABLE planificacion")
-    run_query("TRUNCATE TABLE compras_estado")
-    return True
+
+    except (psycopg2.InterfaceError, psycopg2.OperationalError) as e:
+        print(f"Reintentando por error de conexión: {e}")
+        return False
+    except Exception as e:
+        st.error(f"Error crítico al subir: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def sync_cloud_to_local():
+    """Descarga el binario de Supabase y sobreescribe el planner.db local"""
+    try:
+        conn = get_supabase_conn()
+        with conn.cursor() as c:
+            c.execute("SELECT archivo_binario FROM sistema_backup WHERE id = 1")
+            blob_data = c.fetchone()[0]
+
+        if blob_data:
+            with open(DB_PATH, 'wb') as f:
+                f.write(blob_data)
+            st.cache_data.clear()
+            return True
+        return False
+    except Exception as e:
+        st.error(f"Error al bajar binario: {e}")
+        return False

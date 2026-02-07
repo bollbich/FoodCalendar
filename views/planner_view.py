@@ -144,5 +144,3 @@ def handle_selection(key, date_obj, momento_str, receta_dict):
     receta_id = receta_dict.get(nueva_seleccion)
     # Solo guardamos si hay una receta válida o si se quiere borrar
     db.save_meal_plan(date_obj, momento_str, receta_id)
-    # Limpiamos la caché de lectura para que al recargar vea el cambio
-    db.get_plan_range_details.clear()
