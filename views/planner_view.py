@@ -90,31 +90,23 @@ def show_planner_page(es_editor, change_date):
     opciones_recetas = {nombre: id_rec for id_rec, nombre in raw_recipes}
     lista_nombres_recetas = [""] + list(opciones_recetas.keys())
 
-    # 2. Definimos las columnas: 7 para los días y 1 para la leyenda
-    columnas = st.columns([0.8, 1, 1, 1, 1, 1, 1, 1])
+    # 2. Definimos las columnas: 7 para los días
+    columnas = st.columns([1, 1, 1, 1, 1, 1, 1])
 
-    dias_nombres = ["Momentos", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    dias_nombres = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
-    # 3. Dibujamos la LEYENDA (Momentos)
-    with columnas[0]:
-        st.markdown('<div style="height:80px;margin-top:1px;"></div>', unsafe_allow_html=True)
-        for momento, emoji in momentos_config.items():
-            st.markdown(f"""
-                        <div style="height:38px; display:flex; align-items:center; background-color:#e1f5fe; border-radius:5px; padding-left:10px; margin-bottom:18px; border: 1px solid #b3e5fc;">
-                            <span style="font-size:0.9em;">{emoji} <b>{momento}</b></span>
-                        </div>
-                    """, unsafe_allow_html=True)
 
-    # 4. Dibujamos los 7 días
+
+    # 3. Dibujamos los 7 días
     for i in range(7):
         current_date = start_of_week + timedelta(days=i)
         date_str = str(current_date)
 
-        with columnas[i + 1]:
-            # Encabezado del día (usamos i+1 para sacar el nombre del día Lunes, Martes...)
+        with columnas[i]:
+            # Encabezado del día
             st.markdown(f"""
                     <div style="background-color:#f0f2f6; padding:10px; border-radius:5px; text-align:center; height:70px; margin-bottom:10px; display:flex; flex-direction:column; justify-content:center;">
-                        <p style="margin:0; font-weight:bold; line-height:1.2;">{dias_nombres[i + 1]}</p>
+                        <p style="margin:0; font-weight:bold; line-height:1.2;">{dias_nombres[i]}</p>
                         <p style="margin:0; font-size:0.8em;">{current_date.strftime('%d/%m')}</p>
                     </div>
                 """, unsafe_allow_html=True)
@@ -124,6 +116,9 @@ def show_planner_page(es_editor, change_date):
                 val_actual = plan_dict.get((date_str, momento), "")
                 idx = lista_nombres_recetas.index(val_actual) if val_actual in lista_nombres_recetas else 0
 
+                emoji = momentos_config[momento]
+                st.caption(f"{emoji} {momento}")
+
                 seleccion = st.selectbox(
                     f"{momento}_{date_str}",
                     lista_nombres_recetas,
@@ -131,8 +126,8 @@ def show_planner_page(es_editor, change_date):
                     key=f"plan_{date_str}_{momento}",
                     label_visibility="collapsed",
                     disabled=not es_editor,
-                    on_change = handle_selection,
-                    args = (f"plan_{date_str}_{momento}", current_date, momento, opciones_recetas)
+                    on_change=handle_selection,
+                    args=(f"plan_{date_str}_{momento}", current_date, momento, opciones_recetas)
                 )
 
                 if seleccion != val_actual:
@@ -142,5 +137,4 @@ def show_planner_page(es_editor, change_date):
 def handle_selection(key, date_obj, momento_str, receta_dict):
     nueva_seleccion = st.session_state[key]
     receta_id = receta_dict.get(nueva_seleccion)
-    # Solo guardamos si hay una receta válida o si se quiere borrar
     db.save_meal_plan(date_obj, momento_str, receta_id)
