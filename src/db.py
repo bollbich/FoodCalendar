@@ -190,21 +190,32 @@ def sync_local_to_cloud():
         if conn:
             conn.close()
 
-
 def sync_cloud_to_local():
-    """Descarga el binario de Supabase y sobreescribe el planner.db local"""
+    """Descarga el archivo .db forzando una conexión nueva"""
+    conn = None
     try:
-        conn = get_supabase_conn()
-        with conn.cursor() as c:
-            c.execute("SELECT archivo_binario FROM sistema_backup WHERE id = 1")
-            blob_data = c.fetchone()[0]
+        st.cache_resource.clear()
 
-        if blob_data:
-            with open(DB_PATH, 'wb') as f:
-                f.write(blob_data)
-            st.cache_data.clear()
-            return True
-        return False
+        conn = get_supabase_conn()
+        if conn is None:
+            return False
+
+        with conn.cursor() as c:
+            c.execute("SET statement_timeout = '60s'")
+            c.execute("SELECT archivo_binario FROM sistema_backup WHERE id = 1")
+            record = c.fetchone()
+
+            if record and record[0]:
+                with open(DB_PATH, 'wb') as f:
+                    f.write(record[0])
+                return True
+            return False
+
     except Exception as e:
-        st.error(f"Error al bajar binario: {e}")
+        print(f"Error al bajar binario: {e}")
+        if "closed" in str(e).lower():
+            st.sidebar.warning("La conexión estaba inactiva. Reintentando...")
         return False
+    finally:
+        if conn:
+            conn.close()
