@@ -25,13 +25,10 @@ def show_recipes_page(es_editor):
                 ings = st.multiselect("Ingredientes", options=opciones_ingredientes.keys(), key="crear_ings")
 
                 if st.button("Guardar Nueva Receta"):
-                    st.write("OK: parece que vamos a guardar")
                     if nom and ings:
-                        st.write("OK: parece que vamos a guardar")
                         ids = [opciones_ingredientes[x] for x in ings]
                         if db.create_recipe(nom, ids):
                             st.toast(f"✅ Receta '{nom}' creada")
-                            ##st.rerun()  # Recarga para que aparezca en la lista de abajo
                         else:
                             st.error("Error al guardar.")
                     else:
