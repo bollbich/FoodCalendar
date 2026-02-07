@@ -68,7 +68,7 @@ def run_query(query, params=(), return_data=False):
             if return_data: return c.fetchall()
     except Exception as e:
         conn.rollback()
-        print(f"Error DB Query: {e}")
+        st.write(f"Error DB Query: {e}")
         return None
 
 # --- SINCRONIZACIÓN MACRO ---
@@ -208,15 +208,12 @@ def get_plan_range_details(start_date, end_date):
         resultado = []
         for p in plan:
             if start_s <= p[0] <= end_s:
-                # --- EL ARREGLO ESTÁ AQUÍ ---
-                # Si p[2] existe, lo hacemos int. Si es None, usamos None.
                 id_receta = int(p[2]) if p[2] is not None else None
                 nombre_receta = recetas_dict.get(id_receta, "") if id_receta else ""
 
                 resultado.append([p[0], p[1], id_receta, nombre_receta])
         return resultado
     else:
-        # Modo SQL (ya lo tenías bien, pero asegúrate de usar LEFT JOIN)
         query = """
             SELECT p.fecha::text, p.momento, p.receta_id, r.nombre 
             FROM planificacion p
@@ -249,16 +246,40 @@ def ensure_special_recipe(nombre_especial):
             return True
         except Exception as e:
             if conn: conn.rollback()
-            print(f"Error en ensure_special_recipe: {e}")
+            st.write(f"Error en ensure_special_recipe: {e}")
             return False
+
 
 def create_recipe(nombre_receta, lista_ids_ingredientes):
     if is_json_mode():
-        recetas = st.session_state.master_json["recetas"]
-        new_id = max([r[0] for r in recetas], default=0) + 1
+        # Aseguramos que master_json existe
+        if "master_json" not in st.session_state:
+            st.write("ERROR: master_json no inicializado en session_state")
+            return False
+        else:
+            st.write("OK: master_json esta inicializado en session_state")
+
+        # EXTRAER Y CONVERTIR A LISTA (Importante: Evita errores de tuplas inmutables)
+        recetas = list(st.session_state.master_json.get("recetas", []))
+        relaciones = list(st.session_state.master_json.get("receta_ingredientes", []))
+
+        # Generar nuevo ID
+        new_id = max([int(r[0]) for r in recetas], default=0) + 1
+
+        st.write(f"DEBUG: Intentando crear '{nombre_receta}' con ID {new_id}")
+
+        # Añadir la receta
         recetas.append([new_id, nombre_receta])
+
+        # Añadir sus ingredientes
         for ing_id in lista_ids_ingredientes:
-            st.session_state.master_json["receta_ingredientes"].append([new_id, ing_id])
+            relaciones.append([new_id, int(ing_id)])
+
+        # GUARDAR DE VUELTA AL SESSION STATE (Reasignar para asegurar persistencia)
+        st.session_state.master_json["recetas"] = recetas
+        st.session_state.master_json["receta_ingredientes"] = relaciones
+
+        st.write(f"DEBUG: Receta guardada. Total recetas en memoria: {len(st.session_state.master_json['recetas'])}")
         return True
     else:
         conn = get_connection()
@@ -266,7 +287,6 @@ def create_recipe(nombre_receta, lista_ids_ingredientes):
             with conn.cursor() as c:
                 c.execute("INSERT INTO recetas (nombre) VALUES (%s) RETURNING id", (nombre_receta,))
                 receta_id = c.fetchone()[0]
-
                 if lista_ids_ingredientes:
                     valores = [(receta_id, ing_id) for ing_id in lista_ids_ingredientes]
                     c.executemany("INSERT INTO receta_ingredientes (receta_id, ingrediente_id) VALUES (%s, %s)",
@@ -274,16 +294,17 @@ def create_recipe(nombre_receta, lista_ids_ingredientes):
                 conn.commit()
             return True
         except Exception as e:
-            conn.rollback()
-            print(f"Error creando receta: {e}")
+            if conn: conn.rollback()
+            st.write(f"Error SQL: {e}")
             return False
-        pass
 
-@st.cache_data
 def get_all_recipes():
     if is_json_mode():
-        return sorted(st.session_state.master_json["recetas"], key=lambda x: x[1])
-    return run_query("SELECT id, nombre FROM recetas ORDER BY nombre", return_data=True) or []
+        # Aquí NO puede haber @st.cache_data
+        return st.session_state.master_json.get("recetas", [])
+    else:
+        # Aquí sí podrías usar una función cacheada aparte
+        return run_query("SELECT id, nombre FROM recetas ORDER BY nombre", return_data=True)
 
 def delete_recipe(receta_id):
     if is_json_mode():
@@ -314,7 +335,7 @@ def update_recipe(receta_id, nuevo_nombre, lista_ids_ingredientes):
             return True
         except Exception as e:
             conn.rollback()
-            print(f"Error al actualizar: {e}")
+            st.write(f"Error al actualizar: {e}")
             return False
 
 def get_recipe_ingredients(receta_id):
