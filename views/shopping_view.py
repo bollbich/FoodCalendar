@@ -5,54 +5,49 @@ from src import db, logic
 
 @st.fragment
 def render_shopping_list_fragment(conteo_detallado, start_w, categorias_dict):
-    """Maneja el estado en memoria y guarda solo al pulsar el botón"""
     state_key = f"carrito_{start_w}"
     if state_key not in st.session_state:
         st.session_state[state_key] = db.get_shopping_status(start_w)
 
-    # 1. BARRA DE PROGRESO
+    def toggle_ingrediente(ing, fecha_inicio):
+        nuevo_estado = st.session_state[f"chk_{fecha_inicio}_{ing}"]
+        st.session_state[state_key][ing] = nuevo_estado
+        db.update_shopping_status(fecha_inicio, ing, nuevo_estado)
+
+    # BARRA DE PROGRESO
     total_items = len(conteo_detallado)
     comprados_count = sum(1 for ing in conteo_detallado if st.session_state[state_key].get(ing, False))
     progreso = comprados_count / total_items if total_items > 0 else 0
     st.progress(progreso, text=f"Progreso: {comprados_count} de {total_items}")
 
-    # 2. AGRUPAR POR CATEGORÍAS
+    # RENDERIZADO
     agrupados = {}
     for ing, datos in conteo_detallado.items():
         cat = categorias_dict.get(ing, "Otros")
         if cat not in agrupados: agrupados[cat] = []
         agrupados[cat].append((ing, datos))
 
-    # 3. RENDERIZAR LISTA
     for cat in sorted(agrupados.keys()):
         with st.expander(f"📦 {cat}", expanded=True):
             c1, c2 = st.columns(2)
             for idx, (ingrediente, datos) in enumerate(sorted(agrupados[cat])):
                 col = c1 if idx % 2 == 0 else c2
-
-                cantidad = datos["cantidad"]
-                # Formateamos los días para que se vean limpios
                 dias_str = ", ".join(sorted(list(datos["dias"])))
 
-                # Checkbox con nombre en negrita y días en cursiva debajo
-                st.session_state[state_key][ingrediente] = col.checkbox(
-                    f"**{ingrediente}** (x{cantidad})  \n  *{dias_str}*",
+                col.checkbox(
+                    f"**{ingrediente}** (x{datos['cantidad']})  \n  *{dias_str}*",
                     value=st.session_state[state_key].get(ingrediente, False),
-                    key=f"chk_{start_w}_{ingrediente}"
+                    key=f"chk_{start_w}_{ingrediente}",
+                    on_change=toggle_ingrediente,
+                    args=(ingrediente, start_w)
                 )
 
     st.write("---")
 
-    # 4. BOTONES DE ACCIÓN
-    c_btn1, c_btn2 = st.columns(2)
-    with c_btn1:
-        if st.button("💾 Guardar Cambios", use_container_width=True, type="primary"):
-            for ingrediente, estado in st.session_state[state_key].items():
-                db.update_shopping_status(start_w, ingrediente, estado)
-            st.toast("✅ ¡Lista actualizada!")
-
-    with c_btn2:
-        if st.button("🗑️ Vaciar lista", use_container_width=True):
+    # --- BOTÓN DE VACIAR CON SEGURIDAD (Popover) ---
+    with st.popover("🗑️ Vaciar lista", use_container_width=True):
+        st.warning("⚠️ ¿Estás seguro? Se borrarán todos los checks de esta semana.")
+        if st.button("Sí, vaciar de todos modos", type="primary", use_container_width=True):
             db.clear_shopping_status(start_w)
             st.session_state[state_key] = {}
             for key in list(st.session_state.keys()):
