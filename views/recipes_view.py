@@ -8,12 +8,10 @@ def show_recipes_page(es_editor):
     # Aseguramos la receta especial
     db.ensure_special_recipe("Compra")
 
-    # CARGA DE DATOS SIEMPRE FRESCA (Sin caché)
     all_ings = db.get_all_ingredients()
     opciones_ingredientes = {nombre: id_ing for id_ing, nombre, _ in all_ings}
     recetas_existentes = db.get_all_recipes()
 
-    # Selector de modo (sustituye a st.tabs para mayor estabilidad)
     modo = st.radio("Acción", ["➕ Crear Nueva", "✏️ Editar / Ver Recetas"], horizontal=True, key="modo_recetas")
 
     if modo == "➕ Crear Nueva":
@@ -46,7 +44,6 @@ def show_recipes_page(es_editor):
                         st.rerun()
 
             # Selector de receta
-            # Al no tener caché, 'recetas_existentes' es la lista REAL de la DB
             receta_selec = st.selectbox(
                 "Selecciona una receta",
                 options=recetas_existentes,
@@ -73,7 +70,6 @@ def show_recipes_page(es_editor):
 
                         if col2.form_submit_button("🗑️ Eliminar", disabled=es_receta_especial):
                             if db.delete_recipe(id_r):
-                                # Limpieza total del estado para que el selector no busque la receta muerta
                                 if "selector_editar_receta" in st.session_state:
                                     del st.session_state["selector_editar_receta"]
                                     st.toast(f"✅ Receta  eliminada")
