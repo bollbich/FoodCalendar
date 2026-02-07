@@ -1,18 +1,16 @@
 import streamlit as st
 from src import db
 
+
 def show_recipes_page(es_editor):
     st.header("Gestión de Recetas")
 
-    # Aseguramos la receta especial
     db.ensure_special_recipe("Compra")
 
-    # CARGA DE DATOS (Al estar aquí, se recargan en cada rerun)
     all_ings = db.get_all_ingredients()
     opciones_ingredientes = {nombre: id_ing for id_ing, nombre, _ in all_ings}
     recetas_existentes = db.get_all_recipes()
 
-    # 1. Contador para forzar el refresco del selector cuando borramos
     if "receta_refresher" not in st.session_state:
         st.session_state.receta_refresher = 0
 
@@ -20,21 +18,26 @@ def show_recipes_page(es_editor):
 
     if modo == "➕ Crear Nueva":
         if not es_editor:
-            st.warning("No tienes permisos para crear recetas.")
+            st.warning("No tienes permisos.")
         else:
-            with st.container(border=True):
-                nom = st.text_input("Nombre del Plato", key="crear_nom")
-                ings = st.multiselect("Ingredientes", options=opciones_ingredientes.keys(), key="crear_ings")
-
-                if st.button("Guardar Nueva Receta", use_container_width=True):
-                    if nom and ings:
-                        ids = [opciones_ingredientes[x] for x in ings]
-                        if db.create_recipe(nom, ids):
-                            st.toast(f"✅ Receta '{nom}' creada")
-                        else:
-                            st.error("Error al guardar.")
+            def guardar_callback():
+                nom = st.session_state.crear_nom
+                ings = st.session_state.crear_ings
+                if nom and ings:
+                    ids = [opciones_ingredientes[x] for x in ings]
+                    if db.create_recipe(nom, ids):
+                        st.toast(f"✅ Receta '{nom}' creada")
+                        st.session_state.crear_nom = ""
+                        st.session_state.crear_ings = []
                     else:
-                        st.warning("Completa los campos.")
+                        st.error("Error al guardar.")
+                else:
+                    st.warning("Completa los campos.")
+
+            with st.container(border=True):
+                st.text_input("Nombre del Plato", key="crear_nom")
+                st.multiselect("Ingredientes", options=opciones_ingredientes.keys(), key="crear_ings")
+                st.button("Guardar Nueva Receta", type="primary", on_click=guardar_callback)
 
     elif modo == "✏️ Editar / Ver Recetas":
         if not recetas_existentes:
@@ -45,8 +48,6 @@ def show_recipes_page(es_editor):
                     if r_nom == "Compra":
                         st.session_state["selector_editar_receta"] = (r_id, r_nom)
                         st.rerun()
-
-            # 2. El selector usa una key que cambia cuando borramos algo
             receta_selec = st.selectbox(
                 "Selecciona una receta",
                 options=recetas_existentes,
