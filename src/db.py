@@ -128,12 +128,14 @@ def get_recipe_ingredients(rid):
 
 def delete_recipe(receta_id):
     run_query("DELETE FROM recetas WHERE id=%s", (receta_id,))
+    return True
 
 def update_recipe(receta_id, nombre, lista_ids):
     run_query("UPDATE recetas SET nombre=%s WHERE id=%s", (nombre, receta_id))
     run_query("DELETE FROM receta_ingredientes WHERE receta_id=%s", (receta_id,))
     for iid in lista_ids:
         run_query("INSERT INTO receta_ingredientes (receta_id, ingrediente_id) VALUES (%s, %s)", (receta_id, iid))
+    return True
 
 # --- PLANIFICACIÓN ---
 

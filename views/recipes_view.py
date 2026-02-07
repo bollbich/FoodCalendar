@@ -69,12 +69,11 @@ def show_recipes_page(es_editor):
                         if col1.form_submit_button("💾 Guardar"):
                             ids_n = [opciones_ingredientes[x] for x in nuevos_ings]
                             if db.update_recipe(id_r, nuevo_nombre, ids_n):
-                                st.toast("Actualizado")
-                                st.rerun()
+                                st.toast(f"✅ Receta actualizada")
 
                         if col2.form_submit_button("🗑️ Eliminar", disabled=es_receta_especial):
                             if db.delete_recipe(id_r):
                                 # Limpieza total del estado para que el selector no busque la receta muerta
                                 if "selector_editar_receta" in st.session_state:
                                     del st.session_state["selector_editar_receta"]
-                                st.rerun()
+                                    st.toast(f"✅ Receta  eliminada")
