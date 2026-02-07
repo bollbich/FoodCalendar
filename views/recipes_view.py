@@ -3,6 +3,7 @@ from src import db
 
 
 def show_recipes_page(es_editor):
+    check_messages()
     st.header("Gestión de Recetas")
 
     db.ensure_special_recipe("Compra")
@@ -26,7 +27,7 @@ def show_recipes_page(es_editor):
                 if nom and ings:
                     ids = [opciones_ingredientes[x] for x in ings]
                     if db.create_recipe(nom, ids):
-                        st.toast(f"✅ Receta '{nom}' creada")
+                        add_message(f"✅ Receta '{nom}' creada", tipo="toast")
                         st.session_state.crear_nom = ""
                         st.session_state.crear_ings = []
                     else:
@@ -46,7 +47,8 @@ def show_recipes_page(es_editor):
             if st.button("🛒 Ir a Lista de Compra General"):
                 for r_id, r_nom in recetas_existentes:
                     if r_nom == "Compra":
-                        st.session_state["selector_editar_receta"] = (r_id, r_nom)
+                        key_actual = f"selector_receta_{st.session_state.receta_refresher}"
+                        st.session_state[key_actual] = (r_id, r_nom)
                         st.rerun()
             receta_selec = st.selectbox(
                 "Selecciona una receta",
@@ -70,10 +72,29 @@ def show_recipes_page(es_editor):
                         if col1.form_submit_button("💾 Guardar"):
                             ids_n = [opciones_ingredientes[x] for x in nuevos_ings]
                             if db.update_recipe(id_r, nuevo_nombre, ids_n):
-                                st.toast(f"✅ Receta actualizada")
+                                add_message("✅ Receta actualizada", tipo="toast")
+                                st.rerun()
 
                         if col2.form_submit_button("🗑️ Eliminar", disabled=es_receta_especial):
                             if db.delete_recipe(id_r):
                                 st.session_state.receta_refresher += 1
+                                add_message("🗑️ Receta eliminada", tipo="toast")
                                 st.rerun()
-                                st.toast(f"✅ Receta eliminada")
+
+def add_message(texto, tipo="info"):
+    """Añade un mensaje a la cola para ser mostrado tras el rerun"""
+    if "cola_mensajes" not in st.session_state:
+        st.session_state.cola_mensajes = []
+    st.session_state.cola_mensajes.append({"texto": texto, "tipo": tipo})
+
+def check_messages():
+    """Revisa si hay mensajes pendientes, los lanza y vacía la lista"""
+    if "cola_mensajes" in st.session_state and st.session_state.cola_mensajes:
+        for msg in st.session_state.cola_mensajes:
+            if msg["tipo"] == "toast":
+                st.toast(msg["texto"])
+            elif msg["tipo"] == "success":
+                st.success(msg["texto"])
+            elif msg["tipo"] == "error":
+                st.error(msg["texto"])
+        st.session_state.cola_mensajes = []
