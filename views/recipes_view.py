@@ -1,16 +1,20 @@
 import streamlit as st
 from src import db
 
-
 def show_recipes_page(es_editor):
     st.header("Gestión de Recetas")
 
     # Aseguramos la receta especial
     db.ensure_special_recipe("Compra")
 
+    # CARGA DE DATOS (Al estar aquí, se recargan en cada rerun)
     all_ings = db.get_all_ingredients()
     opciones_ingredientes = {nombre: id_ing for id_ing, nombre, _ in all_ings}
     recetas_existentes = db.get_all_recipes()
+
+    # 1. Contador para forzar el refresco del selector cuando borramos
+    if "receta_refresher" not in st.session_state:
+        st.session_state.receta_refresher = 0
 
     modo = st.radio("Acción", ["➕ Crear Nueva", "✏️ Editar / Ver Recetas"], horizontal=True, key="modo_recetas")
 
@@ -22,7 +26,7 @@ def show_recipes_page(es_editor):
                 nom = st.text_input("Nombre del Plato", key="crear_nom")
                 ings = st.multiselect("Ingredientes", options=opciones_ingredientes.keys(), key="crear_ings")
 
-                if st.button("Guardar Nueva Receta"):
+                if st.button("Guardar Nueva Receta", use_container_width=True):
                     if nom and ings:
                         ids = [opciones_ingredientes[x] for x in ings]
                         if db.create_recipe(nom, ids):
@@ -36,19 +40,18 @@ def show_recipes_page(es_editor):
         if not recetas_existentes:
             st.info("No hay recetas.")
         else:
-            # Botón rápido para ir a la Compra General
             if st.button("🛒 Ir a Lista de Compra General"):
                 for r_id, r_nom in recetas_existentes:
                     if r_nom == "Compra":
                         st.session_state["selector_editar_receta"] = (r_id, r_nom)
                         st.rerun()
 
-            # Selector de receta
+            # 2. El selector usa una key que cambia cuando borramos algo
             receta_selec = st.selectbox(
                 "Selecciona una receta",
                 options=recetas_existentes,
                 format_func=lambda x: x[1],
-                key="selector_editar_receta"
+                key=f"selector_receta_{st.session_state.receta_refresher}"
             )
 
             if receta_selec:
@@ -70,6 +73,6 @@ def show_recipes_page(es_editor):
 
                         if col2.form_submit_button("🗑️ Eliminar", disabled=es_receta_especial):
                             if db.delete_recipe(id_r):
-                                if "selector_editar_receta" in st.session_state:
-                                    del st.session_state["selector_editar_receta"]
-                                    st.toast(f"✅ Receta  eliminada")
+                                st.session_state.receta_refresher += 1
+                                st.rerun()
+                                st.toast(f"✅ Receta eliminada")
