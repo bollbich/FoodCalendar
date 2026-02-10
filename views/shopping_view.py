@@ -30,9 +30,12 @@ def render_shopping_list_fragment(conteo_detallado, start_w, categorias_dict):
     for cat in sorted(agrupados.keys()):
         with st.expander(f"📦 {cat}", expanded=True):
             c1, c2 = st.columns(2)
+            orden_semana = {d: i for i, d in
+                            enumerate(["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"])}
             for idx, (ingrediente, datos) in enumerate(sorted(agrupados[cat])):
                 col = c1 if idx % 2 == 0 else c2
-                dias_str = ", ".join(sorted(list(datos["dias"])))
+                dias_ordenados = sorted(list(datos["dias"]), key=lambda d: orden_semana.get(d, 99))
+                dias_str = ", ".join(dias_ordenados)
 
                 col.checkbox(
                     f"**{ingrediente}** (x{datos['cantidad']})  \n  *{dias_str}*",
